@@ -18,6 +18,8 @@ curl -fsSL --connect-timeout 15 --max-time 60 https://gh-proxy.com/https://raw.g
 
 下载代理同时用于仓库压缩包和官方二进制，二进制仍校验固定 SHA256。已有 HTTP/SOCKS 代理也可以通过 curl 标准环境变量配置。
 
+如果仓库需要代理、而官方 Release 可以直连，可额外设置 `SING_BOX_DOWNLOAD_PREFIX=''`，单独让二进制直连，避免慢速镜像拖慢安装。
+
 最小系统若未安装 curl，先执行：
 
 ```bash
