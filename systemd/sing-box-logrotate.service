@@ -1,0 +1,6 @@
+[Unit]
+Description=Rotate sing-box gateway logs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate --state /var/lib/logrotate/sing-box.status /etc/logrotate.d/sing-box-gateway

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+# 仅移除本项目拥有的规则，不触碰系统其它防火墙表。
+if nft list table inet singbox_tproxy >/dev/null 2>&1; then
+  nft delete table inet singbox_tproxy
+fi
+for family in -4 -6; do
+  if ip "$family" rule show | grep -q 'fwmark 0x1 lookup 100'; then
+    ip "$family" rule del fwmark 1 table 100 priority 100
+  fi
+  ip "$family" route flush table 100
+done

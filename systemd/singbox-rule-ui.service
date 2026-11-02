@@ -1,0 +1,21 @@
+[Unit]
+Description=Sing-box Rule UI
+Wants=network-online.target
+After=network-online.target sing-box.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/singbox-rule-ui
+Environment=PYTHONUNBUFFERED=1
+Environment=RULE_UI_HOST=0.0.0.0
+Environment=RULE_UI_PORT=9091
+EnvironmentFile=-/etc/default/singbox-gateway
+ExecStart=/usr/bin/python3 /opt/singbox-rule-ui/app.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

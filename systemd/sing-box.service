@@ -1,0 +1,21 @@
+[Unit]
+Description=sing-box gateway
+Wants=network-online.target sing-box-tproxy.service
+After=network-online.target sing-box-tproxy.service
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/sing-box
+ExecStartPre=/usr/local/sbin/refresh-sing-box-runtime-config
+ExecStartPre=/usr/local/bin/sing-box check -c /etc/sing-box/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly sing-box rules update
+
+[Timer]
+OnCalendar=Sun *-*-* 04:20:00
+RandomizedDelaySec=15min
+Persistent=true
+Unit=update-sing-box-rules.service
+
+[Install]
+WantedBy=timers.target

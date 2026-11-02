@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+/usr/local/bin/sing-box version | head -1
+ip -4 route get 1.1.1.1
+systemctl --no-pager is-active sing-box sing-box-tproxy singbox-rule-ui
+echo 'Rule UI: http://<LAN-IP>:9091'
+echo 'UI 密码文件: /etc/sing-box/rule-ui/token'
+echo '查看密码: cat /etc/sing-box/rule-ui/token'
+echo '配置检查: sing-box check -c /etc/sing-box/config.json'
+echo '日志: journalctl -u sing-box -u singbox-rule-ui -e'
+systemctl --no-pager list-timers update-sing-box-rules.timer monitor-sing-box-runtime.timer

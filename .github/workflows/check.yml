@@ -1,0 +1,17 @@
+name: Validate
+on:
+  push:
+  pull_request:
+jobs:
+  syntax-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m compileall -q scripts singbox-rule-ui
+      - run: bash -n scripts/install.sh scripts/uninstall.sh scripts/stop-sing-box-tproxy scripts/update-sing-box-rules-jsdelivr scripts/pve-create-template.sh scripts/sing-box-gateway-info
+      - run: sh -n scripts/quick-install.sh
+      - run: node --check singbox-rule-ui/static/app.js
+      - run: python scripts/check_config_idempotency.py

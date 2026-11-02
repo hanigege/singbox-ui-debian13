@@ -1,0 +1,10 @@
+[Unit]
+Description=Check sing-box network state every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Unit=monitor-sing-box-runtime.service
+
+[Install]
+WantedBy=timers.target

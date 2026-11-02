@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh sing-box listeners and IPv6 capture prefixes
+After=network-online.target sing-box.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/monitor-sing-box-runtime
+TimeoutStartSec=120

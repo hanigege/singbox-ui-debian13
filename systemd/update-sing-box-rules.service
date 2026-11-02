@@ -1,0 +1,11 @@
+[Unit]
+Description=Update and validate sing-box rule sets
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/update-sing-box-rules-jsdelivr
+TimeoutStartSec=300
+StandardOutput=append:/var/log/sing-box-gateway/rule-update.log
+StandardError=append:/var/log/sing-box-gateway/rule-update.log
