@@ -10,6 +10,14 @@ Debian 13 minimal 上的 sing-box 网关与 Rule UI，一键安装、systemd 管
 curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | bash
 ```
 
+如果所在网络无法直连 GitHub，可显式选用下载代理（由第三方提供）：
+
+```bash
+curl -fsSL --connect-timeout 15 --max-time 60 https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | GITHUB_DOWNLOAD_PREFIX=https://gh-proxy.com/ bash
+```
+
+下载代理同时用于仓库压缩包和官方二进制，二进制仍校验固定 SHA256。已有 HTTP/SOCKS 代理也可以通过 curl 标准环境变量配置。
+
 最小系统若未安装 curl，先执行：
 
 ```bash

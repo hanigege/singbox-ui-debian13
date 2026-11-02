@@ -11,6 +11,7 @@ fi
 gateway_tmp=$(mktemp -d)
 trap 'rm -rf "$gateway_tmp"' EXIT HUP INT TERM
 gateway_ref=${SINGBOX_UI_REF:-main}
-curl -fL --retry 3 --retry-all-errors --connect-timeout 15 "https://codeload.github.com/hanigege/singbox-ui-debian13/tar.gz/$gateway_ref" -o "$gateway_tmp/source.tar.gz"
+gateway_prefix=${GITHUB_DOWNLOAD_PREFIX:-}
+curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 "${gateway_prefix}https://github.com/hanigege/singbox-ui-debian13/archive/$gateway_ref.tar.gz" -o "$gateway_tmp/source.tar.gz"
 tar -xzf "$gateway_tmp/source.tar.gz" -C "$gateway_tmp" --strip-components=1
 bash "$gateway_tmp/scripts/install.sh"
