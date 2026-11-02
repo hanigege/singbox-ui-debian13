@@ -11,7 +11,11 @@ fi
 exec 8>/run/singbox-ui-install.lock
 flock -n 8 || { echo '已有安装正在运行。' >&2; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
+if getent ahostsv4 github.com | awk '{print $1}' | grep -Eq '^(28\.|198\.(18|19)\.)'; then
+  echo '系统 DNS 返回了其它网关的 FakeIP，无法供本机 TProxy 使用。请将系统上游 DNS 改为真实解析器（如 223.5.5.5），再重新安装。' >&2
+  exit 1
+fi
+apt-get -o APT::Update::Error-Mode=any update
 apt-get install -y --no-install-recommends ca-certificates curl python3 nftables iproute2 iputils-ping rsync util-linux logrotate procps
 gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$

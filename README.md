@@ -58,6 +58,8 @@ cat /etc/sing-box/rule-ui/token
 
 建议为部署机器设置 DHCP 静态租约或 cloud-init 固定地址。每两分钟检测 IP/IPv6 前缀变化，仅发生变化或服务异常时重新应用。
 
+网关操作系统自身应使用返回真实 IP 的 DNS，例如 `223.5.5.5`；不要继承另一台网关的 FakeIP DNS，否则同一个 `28.x` 地址可能在两台机器上对应不同域名，导致 APT/HTTPS 失败。安装器检测到常见 FakeIP 地址会明确停止。PVE 模板默认设置真实上游 DNS，可通过 `DNS_SERVER` 修改。
+
 ## 日常维护
 
 ```bash
@@ -70,6 +72,8 @@ systemctl list-timers '*sing-box*'
 ```
 
 规则默认每周日 04:20 更新，随机延迟最多 15 分钟；systemd timer 的 `Persistent=true` 会补跑关机错过的任务。可在 UI 修改时间，保存在 timer drop-in 中。维护页能检查配置健康、规则文件、IPv6 前缀、节点状态。
+
+计划使用系统时区；可用 `timedatectl set-timezone Asia/Shanghai` 设置北京时间。
 
 ```text
 /etc/sing-box/config.json               生效配置

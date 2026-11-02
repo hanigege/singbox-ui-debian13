@@ -5,7 +5,7 @@ if [ "$(id -u)" != 0 ]; then
   exit 1
 fi
 if ! command -v curl >/dev/null 2>&1; then
-  apt-get update
+  apt-get -o APT::Update::Error-Mode=any update
   apt-get install -y --no-install-recommends curl ca-certificates
 fi
 gateway_tmp=$(mktemp -d)
