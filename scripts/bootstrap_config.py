@@ -323,10 +323,11 @@ def rebootstrap_existing():
     import sys
     sys.path.insert(0, "/opt/singbox-rule-ui")
     try:
-        from app import render_config
+        from app import render_config, validate_outbound_references
         nodes = json.loads(NODES_PATH.read_text(encoding="utf-8"))
         groups = json.loads(GROUPS_PATH.read_text(encoding="utf-8"))
         config = render_config(nodes=nodes, groups=groups, rule_dir=RULE_DIR)
+        validate_outbound_references(config)
         with tempfile.TemporaryDirectory(prefix="bootstrap-check-") as name:
             candidate = Path(name) / "config.json"
             write_json(candidate, config)
@@ -356,7 +357,10 @@ def main():
         nodes = template_nodes()
     secret = secrets.token_urlsafe(24)
     base = base_config(lan_ip, secret, fake4, fake6, ipv6_dns)
-    default_node = nodes[0]["outbound"]["tag"]
+    enabled_tags = [node["outbound"]["tag"] for node in nodes if node.get("enabled", True)]
+    if not enabled_tags:
+        raise ValueError("首次安装必须至少提供一个启用的节点")
+    default_node = enabled_tags[0]
     groups = {
         # 初装默认不打断既有连接，避免 urltest 切换节点时让游戏/语音长连接掉线重连。
         "proxy": {"default": default_node, "interrupt_exist_connections": DEFAULT_INTERRUPT_EXIST_CONNECTIONS},

@@ -1544,7 +1544,7 @@ def add_inbound_tag(config, tag):
             inbound = rule.get("inbound")
             if inbound is None:
                 continue
-            if isinstance(inbound, list):
+            if isinstance(inbound, list) and "dns-in" in inbound:
                 if tag not in inbound:
                     inbound.append(tag)
             elif inbound == "dns-in":
@@ -2649,6 +2649,14 @@ def render_tproxy_script(nodes=None, groups=None, normalized_lists=None):
     iface = sets["interface"]
     if not iface:
         raise ValueError("Cannot detect default network interface")
+    lan_ip = default_lan_ip()
+    if not lan_ip:
+        raise ValueError("Cannot detect LAN IPv4 address for DNS DNAT")
+    dns6_listen = preferred_ipv6_listener(lan_ip)
+    # redirect 可能选到未监听 DNS 的 GUA，明确指向实际 LAN/ULA 监听地址。
+    dns_dnat = f'    meta nfproto ipv4 meta l4proto {{ tcp, udp }} th dport 53 dnat ip to {lan_ip}:53'
+    if dns6_listen:
+        dns_dnat += f'\n    meta nfproto ipv6 meta l4proto {{ tcp, udp }} th dport 53 dnat ip6 to [{dns6_listen}]:53'
     bypass4_set = render_nft_set("bypass4", "ipv4_addr", sets["bypass4"])
     bypass6_set = render_nft_set("bypass6", "ipv6_addr", sets["bypass6"])
     proxy4_set = render_nft_set("proxy4", "ipv4_addr", sets["proxy4"])
@@ -2748,8 +2756,9 @@ table inet singbox_tproxy {{
     type nat hook prerouting priority dstnat; policy accept;
 
     iifname != "${{IFACE}}" return
-    udp dport 53 redirect to :53
-    tcp dport 53 redirect to :53
+    # 本机地址保持不变，避免将公网 GUA 查询改送 ULA 形成开放解析器。
+    fib daddr type local return
+{dns_dnat}
   }}
 
   chain postrouting {{
@@ -3011,15 +3020,11 @@ def config_health_status():
     }
     mtu = interface_mtu(first_default_interface())
     # 接口 MTU 非标准值时验证路径 MTU 1500 是否可达，可达则视同标准
-    # 不通则尝试自动探测并设置最佳 MTU
+    # 维护页 GET 只报告状态，不自动改写网卡 MTU。
     if str(mtu) not in ("1492", "1500"):
         iface = first_default_interface()
         if check_path_mtu_1500(iface):
             mtu = "1500"
-        else:
-            fixed = auto_fix_mtu(iface)
-            if fixed:
-                mtu = fixed
     local_dns_status = {
         "type": local_dns.get("type", ""),
         "server": local_dns.get("server", ""),
@@ -4367,12 +4372,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    token = get_token()
+    get_token()
     host = os.environ.get("RULE_UI_HOST", "0.0.0.0")
     port = int(os.environ.get("RULE_UI_PORT", "9091"))
     print(f"Sing-box Rule UI listening on http://{host}:{port}")
     print(f"Token file: {TOKEN_FILE}")
-    print(f"Token: {token}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 

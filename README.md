@@ -50,6 +50,7 @@ cat /etc/sing-box/rule-ui/token
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
 - 所有 UI 保存与导入都先生成临时配置，执行 `sing-box check`，通过后原子落盘；运行态应用失败回滚。
 - nftables 只管理 `inet singbox_tproxy`，整表先校验再以单事务替换。不会 flush 其它防火墙规则。
+- DNS 劫持明确 DNAT 到实际 LAN/ULA 监听地址，不依赖 GUA/ULA 的地址顺序；公网 GUA 不提供递归解析。
 - 不修改 `/etc/resolv.conf`，不自动停止其它 DNS。若 LAN 53 端口冲突，安装失败并显示占用进程。
 - 默认不广播 IPv6 RA、不打开系统转发。需要让机器承担三层网关时，在 `/etc/default/singbox-gateway` 显式启用 forwarding，再重启 TProxy。
 - 日志每小时检查大小、保留 6 份压缩文件；systemd 日志按系统 journal 策略管理。
@@ -129,5 +130,7 @@ python3 scripts/check_config_idempotency.py
 python3 scripts/health_check.py  # 需要已安装的 Debian 13
 python3 scripts/acceptance_test.py  # 在独立测试机执行，会保存/导入配置并重启服务
 ```
+
+另在独立 LAN 客户端运行 `python3 scripts/check_lan_dns.py 192.0.2.6 fd00::6`（替换为网关 IPv4 / ULA 地址），确认 UDP/TCP DNS 从客户端也能访问。
 
 新版本必须在 Debian 13 VM 验证首次安装、复装、非法配置拒绝、备份导入导出、systemd timer、IPv4/IPv6 FakeIP、nftables、整机重启和保留数据卸载/重装。
