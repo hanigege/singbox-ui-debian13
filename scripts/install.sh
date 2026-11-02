@@ -68,7 +68,7 @@ print(asset["sha256"])
 PY
 )
 test "${#asset[@]}" = 3 || { echo "不支持架构: $arch" >&2; exit 1; }
-curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "${GITHUB_DOWNLOAD_PREFIX:-}${asset[1]}" -o "$gateway_tmp/sing-box.tar.gz"
+curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 "${GITHUB_DOWNLOAD_PREFIX:-}${asset[1]}" -o "$gateway_tmp/sing-box.tar.gz"
 echo "${asset[2]}  $gateway_tmp/sing-box.tar.gz" | sha256sum -c -
 mkdir "$gateway_tmp/binary"
 tar -xzf "$gateway_tmp/sing-box.tar.gz" -C "$gateway_tmp/binary" --strip-components=1
