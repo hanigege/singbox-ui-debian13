@@ -24,7 +24,7 @@ def load_app(workdir):
     app.BACKUP_DIR = app.MANAGER_DIR / "backups"
     app.TOKEN_FILE = workdir / "rule-ui" / "token"
     # 本测试只验证渲染幂等性；固定运行态监听信息，避免依赖测试机是否有 Linux ip 命令。
-    app.default_lan_ip = lambda: "10.20.20.6"
+    app.default_lan_ip = lambda: "192.0.2.6"
     app.assigned_ipv6_addresses = lambda: []
     return app
 
@@ -50,7 +50,7 @@ def sample_base_config():
         },
         "inbounds": [
             {"type": "tproxy", "tag": "tproxy-in", "listen": "::", "listen_port": 9888, "sniff": False},
-            {"type": "direct", "tag": "dns-in", "listen": "10.20.20.6", "listen_port": 53},
+            {"type": "direct", "tag": "dns-in", "listen": "192.0.2.6", "listen_port": 53},
         ],
         "outbounds": [],
         "route": {
@@ -62,7 +62,7 @@ def sample_base_config():
         },
         "experimental": {
             "cache_file": {"enabled": True, "store_fakeip": True},
-            "clash_api": {"external_controller": "10.20.20.6:9090", "secret": "test", "default_mode": "rule"},
+            "clash_api": {"external_controller": "192.0.2.6:9090", "secret": "test", "default_mode": "rule"},
         },
     }
 

@@ -6,6 +6,8 @@ Debian 13 minimal 上的 sing-box 网关与 Rule UI，一键安装、systemd 管
 
 适用 Debian 13 minimal 的 VM 或裸机，支持 amd64 / arm64。建议 1–2 核、1 GB RAM、8 GB 磁盘；需要 root 和能访问 Debian、GitHub 的网络。
 
+静态 IP 和 DHCP 均支持。安装器读取系统当前地址作为监听地址，不修改用户已经配置好的 IP、默认网关或网卡。
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | bash
 ```
