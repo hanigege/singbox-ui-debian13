@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""真实节点配置完成后，验证双栈 DNS 和 FakeIP 透明代理。"""
+"""真实节点配置完成后，按当前 FakeIP 设置验证 DNS 和透明代理。"""
 import ipaddress
 import json
 import secrets
@@ -46,19 +46,36 @@ def query(server: str, name: str, record_type: int) -> list[str]:
 def main() -> None:
     config = json.loads(Path("/etc/sing-box/config.json").read_text())
     ipv4 = next(item["listen"] for item in config["inbounds"] if item["tag"] == "dns-in")
+    fakeip_server = next(
+        (item for item in config["dns"]["servers"] if item.get("type") == "fakeip"),
+        None,
+    )
+    if fakeip_server is None:
+        raise RuntimeError("配置中没有 FakeIP DNS server")
+    fakeip4 = ipaddress.ip_network(fakeip_server["inet4_range"], strict=True)
+    fakeip6 = ipaddress.ip_network(fakeip_server["inet6_range"], strict=True)
+    groups_path = Path("/etc/sing-box/manager/groups.json")
+    groups = json.loads(groups_path.read_text()) if groups_path.exists() else {}
+    ipv6_enabled = groups.get("fakeip", {}).get("ipv6_enabled", True) is not False
     domain = "www.gstatic.com"
-    for version, kind, network in ((4, 1, "28.0.0.0/8"), (6, 28, "2001:2::/64")):
+    for version, kind, network in ((4, 1, fakeip4), (6, 28, fakeip6)):
+        if version == 6 and not ipv6_enabled:
+            print("IPv6 FakeIP / AAAA: disabled; skipped")
+            continue
         answers = query(ipv4, domain, kind)
-        fakeip = next(address for address in answers if ipaddress.ip_address(address) in ipaddress.ip_network(network))
+        fakeip = next((address for address in answers if ipaddress.ip_address(address) in network), None)
+        if fakeip is None:
+            raise RuntimeError(f"DNS 未返回配置网段内的 FakeIP: IPv{version} {network}")
         print(f"DNS AAAA/A -> FakeIP IPv{version}: {fakeip}")
         resolve_address = f"[{fakeip}]" if version == 6 else fakeip
         subprocess.run(["curl", "--fail", "--silent", "--show-error", "--max-time", "25", "--noproxy", "*", "--resolve", f"{domain}:443:{resolve_address}", f"https://{domain}/generate_204", "-o", "/dev/null", "-w", f"FakeIP IPv{version} HTTPS: %{{http_code}}\n"], check=True)
-    for inbound in config["inbounds"]:
-        if inbound["tag"] == "dns-in-v6":
-            assert query(inbound["listen"], domain, 28)
-            print("IPv6 ULA DNS: PASS")
+    ipv6_dns = next((item for item in config["inbounds"] if item.get("tag") == "dns-in-v6"), None)
+    if ipv6_dns:
+        answers = query(ipv6_dns["listen"], domain, 1)
+        assert any(ipaddress.ip_address(item) in fakeip4 for item in answers), "IPv6 DNS 监听未返回配置网段内的 FakeIP IPv4"
+        print("IPv6 ULA DNS -> FakeIP IPv4: PASS")
     direct = query(ipv4, "www.baidu.com", 1)
-    assert direct and all(ipaddress.ip_address(item) not in ipaddress.ip_network("28.0.0.0/8") for item in direct)
+    assert direct and all(ipaddress.ip_address(item) not in fakeip4 for item in direct)
     print("国内 DNS 真实地址: PASS")
 
 

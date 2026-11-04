@@ -9,3 +9,26 @@ echo '查看密码: cat /etc/sing-box/rule-ui/token'
 echo '配置检查: sing-box check -c /etc/sing-box/config.json'
 echo '日志: journalctl -u sing-box -u singbox-rule-ui -e'
 systemctl --no-pager list-timers update-sing-box-rules.timer monitor-sing-box-runtime.timer
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+config = json.loads(Path("/etc/sing-box/config.json").read_text())
+groups_path = Path("/etc/sing-box/manager/groups.json")
+groups = json.loads(groups_path.read_text()) if groups_path.exists() else {}
+fakeip = next((item for item in config.get("dns", {}).get("servers", []) if item.get("type") == "fakeip"), {})
+ipv6_dns = next((item.get("listen") for item in config.get("inbounds", []) if item.get("tag") == "dns-in-v6"), "")
+ipv6_enabled = groups.get("fakeip", {}).get("ipv6_enabled", True) is not False
+print("FakeIP routes:")
+if fakeip.get("inet4_range"):
+    print(f"  IPv4 {fakeip['inet4_range']} -> use this gateway's LAN IPv4")
+if ipv6_enabled and fakeip.get("inet6_range"):
+    next_hop = ipv6_dns or "<no ULA DNS listener detected>"
+    print(f"  IPv6 {fakeip['inet6_range']} -> {next_hop}")
+    if not ipv6_dns:
+        print("  Add a reachable LAN ULA to this gateway and configure the upstream route, or disable IPv6 FakeIP / AAAA in Rule UI.")
+    else:
+        print("  Configure the upstream router to route this IPv6 range to the ULA shown above.")
+elif fakeip.get("inet6_range"):
+    print("  IPv6 FakeIP / AAAA is disabled in Rule UI.")
+PY

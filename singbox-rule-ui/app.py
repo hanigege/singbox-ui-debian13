@@ -1133,7 +1133,7 @@ def apply_route_final_policy(config):
         for rule in rules
         if not (isinstance(rule, dict) and rule.get("outbound") == "direct" and set(rule.keys()) == {"outbound"})
     ]
-    # 2026-08-20 小哥拍板：兜底出口跟随 base.json 的 route.final（现为 Proxy），不再写死 direct。
+    # 兜底出口跟随 base.json 的 route.final，避免测速入口和主路由使用不同的出口策略。
     # 8-19 二次回滚曾强制 direct；改回尊重源头配置，仅校验合法值，非法/缺失时兜底 direct。
     final = route.get("final", "direct")
     if final not in ("direct", "Proxy"):

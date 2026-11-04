@@ -69,6 +69,8 @@ cat /etc/sing-box/rule-ui/token
 
 客户端 DNS 指向此机。FakeIP 默认 `28.0.0.0/8` 和 `2001:2::/64`，上游路由器需要把这两个网段路由到本机 IPv4/IPv6 地址；显式灰名单 IP/CIDR 与 Telegram IP 捕获同样需要流量经过本机。真实地址直连流量继续走现有上游网关。仅修改 DNS、没有匹配路由时，FakeIP 无法到达透明代理。
 
+IPv6 下一跳应使用当前网关实际可达的 ULA；`sing-box-gateway-info` 会显示检测到的 DNS 监听地址和当前 FakeIP 网段。FakeIP 网段可在 UI 修改，路由器中的对应路由也必须同步更新。
+
 建议为部署机器设置 DHCP 静态租约或 cloud-init 固定地址。每两分钟检测 IP/IPv6 前缀变化，仅发生变化或服务异常时重新应用。
 
 网关操作系统自身应使用返回真实 IP 的 DNS，例如 `223.5.5.5`；不要继承另一台网关的 FakeIP DNS，否则同一个 `28.x` 地址可能在两台机器上对应不同域名，导致 APT/HTTPS 失败。安装器检测到常见 FakeIP 地址会明确停止。PVE 模板默认设置真实上游 DNS，可通过 `DNS_SERVER` 修改。

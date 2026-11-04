@@ -159,7 +159,7 @@
           <section class="compact-settings fakeip-settings" aria-label="FakeIP settings">
             <div class="settings-intro">
               <h3 data-i18n="fakeipTitle">FakeIP</h3>
-              <p data-i18n="fakeipNote">Match this range with the upstream router.</p>
+              <p data-i18n="fakeipNote">Match FakeIP ranges with upstream routes; use this gateway's LAN ULA as the IPv6 next hop.</p>
             </div>
             <label class="range-field">
               <span data-i18n="fakeipV4">IPv4 range</span>
@@ -175,7 +175,7 @@
                   <input id="fakeipIpv6Enabled" type="checkbox" checked />
                   <strong data-i18n="fakeipIpv6Enabled">Enable IPv6 FakeIP / AAAA</strong>
                 </span>
-                <small data-i18n="fakeipIpv6Help">Return IPv6 FakeIP answers for matched domains when the upstream router sends the IPv6 FakeIP range back to sing-box.</small>
+                <small data-i18n="fakeipIpv6Help">Return IPv6 FakeIP answers only when the upstream router routes the configured IPv6 range to this gateway's ULA.</small>
               </label>
               <label class="policy-option">
                 <span class="policy-option-head">
