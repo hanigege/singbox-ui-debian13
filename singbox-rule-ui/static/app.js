@@ -691,6 +691,8 @@ let nodeEditChanged = false;
 let metaUpdatedAt = null;
 let metaRefreshInFlight = false;
 let delayRefreshInFlight = false;
+let delayRefreshPending = false;
+let proxyRequestVersion = 0;
 let dnsDelayRefreshInFlight = false;
 let logStreamController = null;
 let runtimePollTimer = null;
@@ -842,6 +844,8 @@ function showApp() {
 }
 
 function logout() {
+  proxyRequestVersion++;
+  delayRefreshPending = false;
   token = "";
   localStorage.removeItem("ruleUiToken");
   state = { lists: { whitelist: [], blacklist: [], greylist: [], ddns: [] }, nodes: [], groups: {}, meta: {} };
@@ -865,7 +869,7 @@ async function load() {
   try {
     state = await api("/api/state");
     metaUpdatedAt = new Date();
-    await loadProxyInfo(false);
+    await loadProxyInfo();
     setDirty(false);
     showApp();
     render();
@@ -934,17 +938,38 @@ async function refreshDnsDelays(options = {}) {
   }
 }
 
-async function loadProxyInfo(testDelay = false) {
+/**
+ * @typedef {{tag?: string, ok: boolean, delay: number|null, error?: string|null}} ProxyDelay
+ * @typedef {{proxy?: {ok: boolean, data?: {now?: string, autoNow?: string, autoError?: string}, error?: string}, delays?: {delays: Record<string, ProxyDelay>}} ProxyPayload
+ */
+
+/** @param {"/api/proxy"|"/api/delays?test=1"} path @returns {Promise<ProxyPayload|null>} */
+async function loadProxyPayload(path) {
+  const requestVersion = ++proxyRequestVersion;
   try {
-    const result = await api(testDelay ? "/api/delays?test=1" : "/api/proxy");
+    const result = await api(path);
+    // 后发请求或配置变更已取代本次快照，旧响应不能覆盖确认过的运行态。
+    if (requestVersion !== proxyRequestVersion) return null;
     applyProxyPayload(result);
     return result;
   } catch (error) {
-    runtimeProxy = { now: null, available: false, error: error.message };
-    return null;
+    if (requestVersion !== proxyRequestVersion) return null;
+    // 读取失败不等于节点切换失败；保留已确认的状态，由调用方报告错误。
+    throw error;
   }
 }
 
+/** @returns {Promise<ProxyPayload|null>} */
+function loadProxyInfo() {
+  return loadProxyPayload("/api/proxy");
+}
+
+/** @returns {Promise<ProxyPayload|null>} */
+function loadProxyDelays() {
+  return loadProxyPayload("/api/delays?test=1");
+}
+
+/** @param {ProxyPayload} result @returns {void} */
 function applyProxyPayload(result) {
   if (result.proxy) {
     runtimeProxy = {
@@ -956,7 +981,13 @@ function applyProxyPayload(result) {
     };
   }
   const delayPayload = result.delays?.delays || {};
-  delays = { ...delays, ...delayPayload };
+  const nextDelays = { ...delays };
+  for (const [tag, item] of Object.entries(delayPayload)) {
+    // 测速失败会清空 Clash history；无历史记录不能抹掉本轮真实错误。
+    if (item.delay == null && !item.error && delays[tag]?.error) continue;
+    nextDelays[tag] = item;
+  }
+  delays = nextDelays;
 }
 
 function applyLanguage() {
@@ -1953,6 +1984,7 @@ async function importBackupFromFile(event) {
   setBusy(true);
   pulseActionButton("importBackupBtn", "importingBackup");
   setStatus(t("importingBackup"));
+  proxyRequestVersion++;
   try {
     const payload = JSON.parse(await file.text());
     const result = await api("/api/backup/import", {
@@ -1961,6 +1993,7 @@ async function importBackupFromFile(event) {
     });
     state = result.state;
     maintenance = result.maintenance || maintenance;
+    proxyRequestVersion++;
     // 导入成功后运行态由后端后台重启应用；先清掉旧缓存，再延迟刷新，避免当前 fetch 被 OpenRC 重启链路打断。
     runtimeProxy = { now: null, available: false };
     delays = {};
@@ -1978,7 +2011,7 @@ async function importBackupFromFile(event) {
     if (result.applyScheduled) {
       refreshMaintenance().catch(() => {});
       pollDelaysAfterImport();
-    } else if (!result.delays) loadProxyInfo(false).then(() => render()).catch(() => {});
+    } else if (!result.delays) loadProxyInfo().then(() => render()).catch(() => {});
   } catch (error) {
     finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
     setStatus(error.message || t("backupImportFailed"), "bad");
@@ -1991,15 +2024,14 @@ async function pollDelaysAfterImport(maxAttempts = 5, interval = 3500) {
   for (let i = 0; i < maxAttempts; i++) {
     if (i > 0) await sleep(interval);
     try {
-      await loadProxyInfo(false);
+      await loadProxyInfo();
       render();
       const hasDelays = Object.values(delays).some((d) => d?.ok && typeof d.delay === "number");
       if (hasDelays) return;
     } catch (e) {}
   }
   try {
-    await loadProxyInfo(true);
-    await loadProxyInfo(false);
+    await loadProxyDelays();
     render();
   } catch (e) {}
 }
@@ -2551,12 +2583,13 @@ function syncNodeFormState() {
 }
 
 async function chooseDefault(tag) {
+  proxyRequestVersion++;
   state.groups.proxy = state.groups.proxy || {};
   state.groups.proxy.default = tag;
   setBusy(true);
   // 后端已改为「Clash API 热切 + 静默落盘」，不重启 sing-box（实测 20ms 级），
   // 所以状态文案不再是「保存并重启」，也不在切换路径里做阻塞式全量测速——
-  // 那两次 loadProxyInfo(true) 每个节点一次 /delay，是 UI 卡顿的另一半原因。
+  // 全量测速每个节点一次 /delay，是 UI 卡顿的另一半原因。
   setStatus(t("switchingProxy"));
   render();
   try {
@@ -2564,6 +2597,7 @@ async function chooseDefault(tag) {
       method: "POST",
       body: JSON.stringify({ tag }),
     });
+    proxyRequestVersion++;
     state = result.state || state;
     maintenance = result.maintenance || maintenance;
     // 后端回读确认过的运行态直接采用，无需再打一次 /api/proxy
@@ -2575,28 +2609,35 @@ async function chooseDefault(tag) {
     } else {
       setStatus(t("proxySwitched"), "ok");
     }
+    // 热切不阻塞操作；若上一轮测速尚未结束，合并为随后的一轮刷新。
+    refreshDelaysInBackground();
   } catch (error) {
     setStatus(`${t("proxySwitchFailed")}: ${error.message}`, "bad");
     // 切换失败时回读真实运行态，避免 UI 停留在乐观更新的错误状态
-    loadProxyInfo(false).catch(() => {});
+    loadProxyInfo().then((result) => { if (result) render(); }).catch((refreshError) => {
+      console.warn("proxy state refresh after switch failure failed", { error: refreshError });
+    });
   } finally {
     setBusy(false);
     render();
-    // 热切不阻塞用户操作，但切换完成后必须后台重测延时，避免列表继续显示旧 history。
-    refreshDelaysAfterSwitch();
   }
 }
 
-async function refreshDelaysAfterSwitch() {
+async function refreshDelaysInBackground() {
+  delayRefreshPending = true;
   if (delayRefreshInFlight) return;
   delayRefreshInFlight = true;
   try {
-    await loadProxyInfo(true);
-    await loadProxyInfo(false);
-    render();
-  } catch (error) {
-    // 节点已经热切成功；后台测速失败不能覆盖切换成功状态。
-    console.warn("background delay refresh after proxy switch failed", error);
+    while (delayRefreshPending) {
+      delayRefreshPending = false;
+      try {
+        const result = await loadProxyDelays();
+        if (result) render();
+      } catch (error) {
+        // 后台读取失败不能把已成功的切换或保存显示为失败。
+        console.warn("background proxy delay refresh failed", { error });
+      }
+    }
   } finally {
     delayRefreshInFlight = false;
   }
@@ -2628,8 +2669,8 @@ async function refreshDelays() {
   pulseActionButton("refreshDelayBtn", "refreshDelay");
   setStatus(t("testingDelay"));
   try {
-    await loadProxyInfo(true);
-    await loadProxyInfo(false);
+    const result = await loadProxyDelays();
+    if (!result) return;
     render();
     finishActionButton("refreshDelayBtn", "actionDone", "done", "refreshDelay");
     setStatus(t("delayUpdated"), "ok");
@@ -2639,6 +2680,7 @@ async function refreshDelays() {
   } finally {
     delayRefreshInFlight = false;
     setBusy(false);
+    if (delayRefreshPending) refreshDelaysInBackground();
   }
 }
 
@@ -2940,6 +2982,7 @@ async function save(silent = false) {
   }
   setBusy(true);
   setStatus(t("savingWithCheck"));
+  proxyRequestVersion++;
   try {
     const result = await api("/api/save", {
       method: "POST",
@@ -2947,19 +2990,19 @@ async function save(silent = false) {
     });
     state = result.state;
     maintenance = result.maintenance || maintenance;
+    proxyRequestVersion++;
     if (result.proxy) applyProxyPayload({ proxy: result.proxy, delays: result.delays });
-    await loadProxyInfo(false);
     if (editingNodeTag && getNode(editingNodeTag)) {
       editingNodeSnapshot = stableNodeString(buildNodeFromForm());
       nodeEditChanged = false;
     }
     setDirty(false);
     render();
-    loadProxyInfo(true).then(() => render()).catch(() => {});
+    refreshDelaysInBackground();
     if (result.tproxySync && result.tproxySync.code !== 0) {
       setStatus(`${t("savedAndRestarted")}；${t("tproxySyncFailed")}`, "bad");
     } else {
-      setStatus(`${t("savedAndRestarted")}；${t("delayUpdated")}`, "ok");
+      setStatus(t("savedAndRestarted"), "ok");
       if (!silent) window.alert(t("savedAlert"));
     }
   } catch (error) {
@@ -2974,10 +3017,14 @@ async function restart() {
   setBusy(true);
   pulseActionButton("restartSingboxBtn", "restartingSingbox");
   setStatus(t("restartingSingbox"));
+  proxyRequestVersion++;
   try {
     const result = await api("/api/restart", { method: "POST", body: "{}" });
     state = result.state;
-    await loadProxyInfo(false);
+    proxyRequestVersion++;
+    loadProxyInfo().then((payload) => { if (payload) render(); }).catch((error) => {
+      console.warn("proxy state refresh after restart failed", { error });
+    });
     render();
     const checkResult = result.check;
     const restartResult = result.restart;
