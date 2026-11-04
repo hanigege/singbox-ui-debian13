@@ -101,7 +101,7 @@ def sample_groups():
     return {
         "proxy": {"default": "Auto", "interrupt_exist_connections": False},
         "auto": {
-            "url": "https://www.gstatic.com/generate_204",
+            "url": "https://cp.cloudflare.com/generate_204",
             "interval": "30s",
             "tolerance": 50,
             "interrupt_exist_connections": False,

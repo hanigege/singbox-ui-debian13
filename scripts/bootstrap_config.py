@@ -365,7 +365,7 @@ def main():
         # 初装默认不打断既有连接，避免 urltest 切换节点时让游戏/语音长连接掉线重连。
         "proxy": {"default": default_node, "interrupt_exist_connections": DEFAULT_INTERRUPT_EXIST_CONNECTIONS},
         "auto": {
-            "url": "https://www.gstatic.com/generate_204",
+            "url": "https://cp.cloudflare.com/generate_204",
             "interval": "30s",
             "tolerance": 50,
             "interrupt_exist_connections": DEFAULT_INTERRUPT_EXIST_CONNECTIONS,

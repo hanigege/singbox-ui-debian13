@@ -2274,7 +2274,7 @@ function renderNodes() {
   state.groups.dns = state.groups.dns || {};
   state.groups.fakeip = state.groups.fakeip || {};
   state.groups.telegram = state.groups.telegram || {};
-  if (document.activeElement !== $("autoUrl")) $("autoUrl").value = state.groups.auto.url || "https://www.gstatic.com/generate_204";
+  if (document.activeElement !== $("autoUrl")) $("autoUrl").value = state.groups.auto.url || "https://cp.cloudflare.com/generate_204";
   if (document.activeElement !== $("autoInterval")) $("autoInterval").value = state.groups.auto.interval || "30s";
   // 官方语义：idle_timeout 是「空闲超时后停止周期测速」（省资源，见 protocol/group/urltest.go
   // loopCheck），不是重新测速；tolerance 才是节点接替的防抖阈值（Select 里 minDelay > delay+tolerance）。
@@ -2582,6 +2582,23 @@ async function chooseDefault(tag) {
   } finally {
     setBusy(false);
     render();
+    // 热切不阻塞用户操作，但切换完成后必须后台重测延时，避免列表继续显示旧 history。
+    refreshDelaysAfterSwitch();
+  }
+}
+
+async function refreshDelaysAfterSwitch() {
+  if (delayRefreshInFlight) return;
+  delayRefreshInFlight = true;
+  try {
+    await loadProxyInfo(true);
+    await loadProxyInfo(false);
+    render();
+  } catch (error) {
+    // 节点已经热切成功；后台测速失败不能覆盖切换成功状态。
+    console.warn("background delay refresh after proxy switch failed", error);
+  } finally {
+    delayRefreshInFlight = false;
   }
 }
 

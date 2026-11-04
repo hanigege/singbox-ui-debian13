@@ -899,7 +899,7 @@ def extract_initial_manager_data(config):
             "interrupt_exist_connections": (proxy or {}).get("interrupt_exist_connections", DEFAULT_INTERRUPT_EXIST_CONNECTIONS),
         },
         "auto": {
-            "url": (auto or {}).get("url", "https://www.gstatic.com/generate_204"),
+            "url": (auto or {}).get("url", "https://cp.cloudflare.com/generate_204"),
             "interval": (auto or {}).get("interval", "30s"),
             "idle_timeout": (auto or {}).get("idle_timeout", DEFAULT_URLTEST_IDLE_TIMEOUT),
             "tolerance": (auto or {}).get("tolerance", DEFAULT_URLTEST_TOLERANCE),
@@ -959,7 +959,7 @@ def load_groups():
     groups["proxy"].setdefault("interrupt_exist_connections", DEFAULT_INTERRUPT_EXIST_CONNECTIONS)
     # 默认保护游戏/语音等长连接；用户可在 UI 高级开关里明确选择切换时中断旧连接。
     groups["proxy"]["interrupt_exist_connections"] = normalize_bool(groups["proxy"]["interrupt_exist_connections"])
-    groups["auto"].setdefault("url", "https://www.gstatic.com/generate_204")
+    groups["auto"].setdefault("url", "https://cp.cloudflare.com/generate_204")
     groups["auto"].setdefault("interval", "30s")
     groups["auto"].setdefault("interrupt_exist_connections", DEFAULT_INTERRUPT_EXIST_CONNECTIONS)
     # urltest 默认只影响新连接；需要快速脱离坏节点时，用户可以手动开启中断旧连接。
@@ -1059,7 +1059,7 @@ def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=N
         "type": "urltest",
         "tag": "Auto",
         "outbounds": preferred_auto_outbounds(tags, groups),
-        "url": groups.get("auto", {}).get("url", "https://www.gstatic.com/generate_204"),
+        "url": groups.get("auto", {}).get("url", "https://cp.cloudflare.com/generate_204"),
         "interval": groups.get("auto", {}).get("interval", "30s"),
         # tolerance：候选节点必须比当前节点快这么多毫秒才接替（官方 urltest.go Select 里
         # `minDelay > history.Delay+g.tolerance`），是防抖阈值——真正的节点切换判据。
@@ -3396,7 +3396,7 @@ def read_delay_history(tag):
 
 
 def test_node_delay(tag, url=None, timeout_ms=5000):
-    query = urlencode({"timeout": int(timeout_ms), "url": url or load_groups().get("auto", {}).get("url", "https://www.gstatic.com/generate_204")})
+    query = urlencode({"timeout": int(timeout_ms), "url": url or load_groups().get("auto", {}).get("url", "https://cp.cloudflare.com/generate_204")})
     result = clash_api_request(f"/proxies/{quote(tag, safe='')}/delay?{query}", timeout=max(8, int(timeout_ms / 1000) + 3))
     if not result["ok"]:
         return {"tag": tag, "ok": False, "delay": None, "error": result["error"]}
