@@ -19,12 +19,13 @@ def main() -> None:
             with urlopen(request, timeout=5) as response:
                 health = json.load(response)["maintenance"]
             if not health["configHealth"]["ok"]:
-                raise RuntimeError(f"配置健康检查失败: {health['configHealth']['summary']}")
-            print("Rule UI HTTP 200；配置健康检查通过。")
+                summary = json.dumps(health["configHealth"]["summary"], ensure_ascii=True)
+                raise RuntimeError(f"Configuration health check failed: {summary}")
+            print("Rule UI HTTP 200; configuration health check passed.")
             return
         except (URLError, ConnectionError, TimeoutError) as exc:
             last_error = exc
-            print(json.dumps({"warning": "等待 Rule UI 监听", "attempt": attempt + 1, "error": str(exc)}, ensure_ascii=False))
+            print(json.dumps({"warning": "waiting for Rule UI", "attempt": attempt + 1, "error": str(exc)}, ensure_ascii=True))
             time.sleep(1)
     if last_error is not None:
         raise last_error
