@@ -53,7 +53,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ipv4", type=ipaddress.IPv4Address)
     parser.add_argument("ipv6", type=ipaddress.IPv6Address)
-    parser.add_argument("--domain", default="www.gstatic.com")
+    parser.add_argument("--domain", default="cp.cloudflare.com")
     args = parser.parse_args()
     for server in (str(args.ipv4), str(args.ipv6)):
         for query in (udp_query, tcp_query):

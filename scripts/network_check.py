@@ -57,7 +57,7 @@ def main() -> None:
     groups_path = Path("/etc/sing-box/manager/groups.json")
     groups = json.loads(groups_path.read_text()) if groups_path.exists() else {}
     ipv6_enabled = groups.get("fakeip", {}).get("ipv6_enabled", True) is not False
-    domain = "www.gstatic.com"
+    domain = "cp.cloudflare.com"
     for version, kind, network in ((4, 1, fakeip4), (6, 28, fakeip6)):
         if version == 6 and not ipv6_enabled:
             print("IPv6 FakeIP / AAAA: disabled; skipped")
