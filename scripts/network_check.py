@@ -28,7 +28,7 @@ def query(server: str, name: str, record_type: int) -> list[str]:
         data, _ = sock.recvfrom(4096)
     response_id, flags, questions, answers, _, _ = struct.unpack("!6H", data[:12])
     if response_id != txid or flags & 15:
-        raise RuntimeError(f"DNS 响应异常: server={server}, flags={flags}")
+        raise RuntimeError(f"Invalid DNS response: server={server}, flags={flags}")
     offset = 12
     for _ in range(questions):
         offset = skip_name(data, offset) + 4
@@ -51,7 +51,7 @@ def main() -> None:
         None,
     )
     if fakeip_server is None:
-        raise RuntimeError("配置中没有 FakeIP DNS server")
+        raise RuntimeError("FakeIP DNS server is missing from config")
     fakeip4 = ipaddress.ip_network(fakeip_server["inet4_range"], strict=True)
     fakeip6 = ipaddress.ip_network(fakeip_server["inet6_range"], strict=True)
     groups_path = Path("/etc/sing-box/manager/groups.json")
@@ -65,7 +65,7 @@ def main() -> None:
         answers = query(ipv4, domain, kind)
         fakeip = next((address for address in answers if ipaddress.ip_address(address) in network), None)
         if fakeip is None:
-            raise RuntimeError(f"DNS 未返回配置网段内的 FakeIP: IPv{version} {network}")
+            raise RuntimeError(f"DNS returned no IPv{version} FakeIP in configured range {network}")
         print(f"DNS AAAA/A -> FakeIP IPv{version}: {fakeip}")
         resolve_address = f"[{fakeip}]" if version == 6 else fakeip
         subprocess.run(["curl", "--fail", "--silent", "--show-error", "--max-time", "25", "--noproxy", "*", "--resolve", f"{domain}:443:{resolve_address}", f"https://{domain}/generate_204", "-o", "/dev/null", "-w", f"FakeIP IPv{version} HTTPS: %{{http_code}}\n"], check=True)
@@ -76,7 +76,7 @@ def main() -> None:
         print("IPv6 ULA DNS -> FakeIP IPv4: PASS")
     direct = query(ipv4, "www.baidu.com", 1)
     assert direct and all(ipaddress.ip_address(item) not in fakeip4 for item in direct)
-    print("国内 DNS 真实地址: PASS")
+    print("Domestic DNS returns real addresses: PASS")
 
 
 if __name__ == "__main__":

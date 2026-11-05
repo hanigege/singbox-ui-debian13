@@ -34,7 +34,7 @@ def main() -> None:
     except HTTPError as exc:
         assert exc.code in (400, 422), exc.code
     else:
-        raise AssertionError("非法 DNS 端口未被拒绝")
+        raise AssertionError("Invalid DNS port was not rejected")
     assert config_hash() == before, "非法请求修改了配置"
     result = api("/api/save", state)
     assert result["check"]["code"] == 0 and result["restart"]["code"] == 0, result.get("error")
@@ -53,7 +53,7 @@ def main() -> None:
     assert maintenance["ruleUpdate"]["summary"]["requiredOk"]
     assert maintenance["tproxy"]["ipv6PrefixMatches"]
     api("/api/proxy")
-    print("PASS: 非法输入不落盘、合法保存、备份导入导出、timer 修改、配置检查、API 和服务恢复")
+    print("PASS: invalid input rejected; save, backup import/export, timer update, config check, API, and service recovery")
 
 
 if __name__ == "__main__":
