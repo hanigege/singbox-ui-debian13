@@ -1,6 +1,6 @@
 # singbox-ui-debian13
 
-Debian 13 minimal 上的 sing-box 网关与 Rule UI，一键安装、systemd 管理、IPv4/IPv6 FakeIP + TProxy 分流。基于 [singbox-ui-alpine-1.14](https://github.com/hanigege/singbox-ui-alpine-1.14) 适配，保留节点、黑白灰名单、DDNS、备份导入导出和运行态维护功能。
+面向 Debian 13 minimal 的独立 sing-box 网关与 Rule UI。支持一键安装、systemd 服务管理、IPv4/IPv6 FakeIP 与 TProxy 分流，以及节点管理、黑白灰名单、DDNS、备份导入导出和运行态维护。
 
 ## 一键安装
 
@@ -45,7 +45,7 @@ cat /etc/sing-box/rule-ui/token
 ## 版本和安装行为
 
 - 固定官方 sing-box **1.14.4 stable**，下载官方发布包并校验 `versions.json` 中的 SHA256。版本升级通过仓库审核后的 manifest 实施，安装器不追随 latest。
-- 使用官方 Linux 二进制和 Debian glibc，无 Alpine 兼容层。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
+- 使用官方 Linux 二进制和 Debian glibc。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
 - 重复安装保留 `nodes/groups/base/token`、自定义规则、timer 计划和 `/etc/default/singbox-gateway`。
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
 - 所有 UI 保存与导入都先生成临时配置，执行 `sing-box check`，通过后原子落盘；运行态应用失败回滚。
@@ -100,9 +100,9 @@ systemctl list-timers '*sing-box*'
 /var/backups/singbox-ui/                安装前完整备份
 ```
 
-## 从 Alpine 迁移
+## 备份与恢复
 
-先在 Alpine UI 导出备份，在 Debian 新 UI 导入。导入仅采用节点、分组和规则，新机器继续使用本机 IP、systemd 和 1.14 的配置渲染逻辑；不复制 OpenRC、网卡、路由器或宿主机配置。导入后校验节点延迟与真实上网，再调整路由器指向新机器。
+在 Rule UI 的维护页导出或导入备份。导入会恢复节点、分组和规则，并按当前 Debian 13 网关的网络环境重新生成配置。更换网关时，导入后先验证节点延迟和实际网络连通性，再调整路由器指向新机器。
 
 原生产网关可继续运行，验证完成后再切换。备份包含节点密码，请妥善保管，勿提交到 GitHub。
 
