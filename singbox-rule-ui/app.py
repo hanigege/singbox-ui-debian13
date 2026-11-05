@@ -1951,6 +1951,16 @@ def wait_for_unit_active(unit, timeout=15):
 
 
 def restart_sing_box():
+    check = check_config()
+    if check["code"] != 0:
+        return {
+            "code": 1,
+            "stdout": check["stdout"],
+            "stderr": check["stderr"] or "Config check failed; sing-box was not restarted.",
+            "precheck": check,
+            "resetFailed": None,
+            "service": unit_status("sing-box"),
+        }
     reset = reset_sing_box_failed()
     restart = run_command(service_args("sing-box", "restart"), timeout=20)
     wait = wait_for_unit_active("sing-box")
@@ -1959,6 +1969,7 @@ def restart_sing_box():
         "code": code,
         "stdout": restart["stdout"],
         "stderr": restart["stderr"],
+        "precheck": check,
         "resetFailed": reset,
         "service": wait["service"],
     }
@@ -3872,7 +3883,7 @@ def import_backup_payload(payload):
     if check["code"] != 0:
         return {
             "ok": False,
-            "error": "Config check failed. Backup was not imported.",
+            "error": "Config check failed. Backup was not imported; current config and running service were left unchanged.",
             "check": check,
             "saved": None,
             "restart": None,

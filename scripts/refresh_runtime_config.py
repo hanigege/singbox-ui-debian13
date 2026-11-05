@@ -180,24 +180,77 @@ def check_rendered_config(path, text):
             temp_path.unlink()
 
 
+def config_is_valid(path):
+    if not path.is_file():
+        return False
+    result = subprocess.run([str(SING_BOX_BIN), "check", "-c", str(path)], text=True, capture_output=True, timeout=30)
+    return result.returncode == 0
+
+
+def recover_last_good_config(error):
+    if config_is_valid(CONFIG_PATH):
+        print(
+            json.dumps(
+                {"level": "warning", "event": "runtime_config_refresh_rejected", "fallback": "current_config", "reason": str(error)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return True
+
+    backup_dir = CONFIG_PATH.parent / "manager" / "backups"
+    backups = sorted(backup_dir.glob("config.json.bak-*"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for backup in backups:
+        if not config_is_valid(backup):
+            continue
+        atomic_write_text(CONFIG_PATH, backup.read_text(encoding="utf-8"))
+        print(
+            json.dumps(
+                {
+                    "level": "warning",
+                    "event": "runtime_config_restored",
+                    "fallback": str(backup),
+                    "reason": str(error),
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return True
+
+    print(
+        json.dumps(
+            {"level": "error", "event": "runtime_config_refresh_failed", "fallback": "unavailable", "reason": str(error)},
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
+    return False
+
+
 def main():
-    if not CONFIG_PATH.exists():
+    try:
+        if not CONFIG_PATH.exists():
+            raise FileNotFoundError(f"sing-box config does not exist: {CONFIG_PATH}")
+        lan_ip = default_lan_ip()
+        ipv6_listen = preferred_ipv6_listener(lan_ip)
+        previous = CONFIG_PATH.read_text(encoding="utf-8")
+        config = render_managed_config()
+        listener_changed = apply_runtime_listeners(config, lan_ip, ipv6_listen)
+        rendered = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
+        if rendered != previous:
+            check_rendered_config(CONFIG_PATH, rendered)
+            atomic_write_text(CONFIG_PATH, rendered)
+            print(f"Rendered sing-box config and updated listeners for {lan_ip}.")
+        elif listener_changed:
+            print(f"Updated sing-box listeners for {lan_ip}.")
+        else:
+            print(f"sing-box config already rendered and listeners match {lan_ip}.")
         return 0
-    lan_ip = default_lan_ip()
-    ipv6_listen = preferred_ipv6_listener(lan_ip)
-    previous = CONFIG_PATH.read_text(encoding="utf-8")
-    config = render_managed_config()
-    listener_changed = apply_runtime_listeners(config, lan_ip, ipv6_listen)
-    rendered = json.dumps(config, indent=2, ensure_ascii=False) + "\n"
-    if rendered != previous:
-        check_rendered_config(CONFIG_PATH, rendered)
-        atomic_write_text(CONFIG_PATH, rendered)
-        print(f"Rendered sing-box config and updated listeners for {lan_ip}.")
-    elif listener_changed:
-        print(f"Updated sing-box listeners for {lan_ip}.")
-    else:
-        print(f"sing-box config already rendered and listeners match {lan_ip}.")
-    return 0
+    except Exception as exc:
+        if recover_last_good_config(exc):
+            return 2
+        raise RuntimeError(f"Runtime config refresh failed without a valid fallback: {exc}") from exc
 
 
 if __name__ == "__main__":

@@ -108,21 +108,31 @@ def main():
     config = load_config()
     config_needs_refresh = bool(lan_ip and not config_matches_runtime(config, lan_ip, ipv6_listener))
     tproxy_needs_refresh = bool(not script_v6 or not ipv6_prefixes_covered(current_v6, script_v6))
+    config_refresh_ok = True
 
     if config_needs_refresh:
         # IPv4 地址或 IPv6 DNS 监听地址发生变化时，先重渲染配置并校验，成功后才重启 sing-box。
-        actions.append({"refreshConfig": run([str(REFRESH_CONFIG)], timeout=30)})
+        refresh = run([str(REFRESH_CONFIG)], timeout=30)
+        actions.append({"refreshConfig": refresh})
         check = run([str(SING_BOX_BIN), "check", "-c", str(CONFIG_PATH)], timeout=30)
         actions.append({"singBoxCheck": check})
-        if check["code"] == 0:
+        config_refresh_ok = refresh["code"] == 0 and check["code"] == 0
+        if config_refresh_ok:
             actions.append({"restartSingBox": restart_service(SING_BOX_SERVICE)})
+        else:
+            actions.append({"restartSingBox": {"code": 1, "skipped": "refresh or pre-restart config check failed; current process was kept running"}})
 
     if tproxy_needs_refresh or not service_active(TPROXY_SERVICE):
         # TProxy 捕获边界依赖当前网卡和 IPv6 前缀；只在前缀不一致或服务异常时刷新。
         actions.append({"restartTproxy": restart_service(TPROXY_SERVICE)})
 
     if not service_active(SING_BOX_SERVICE):
-        actions.append({"restartSingBoxInactive": restart_service(SING_BOX_SERVICE)})
+        check = run([str(SING_BOX_BIN), "check", "-c", str(CONFIG_PATH)], timeout=30)
+        actions.append({"inactiveSingBoxCheck": check})
+        if check["code"] == 0:
+            actions.append({"restartSingBoxInactive": restart_service(SING_BOX_SERVICE)})
+        else:
+            actions.append({"restartSingBoxInactive": {"code": 1, "skipped": "config check failed; Rule UI remains available for correction"}})
 
     if not service_active(UI_SERVICE):
         actions.append({"restartUiInactive": restart_service(UI_SERVICE)})

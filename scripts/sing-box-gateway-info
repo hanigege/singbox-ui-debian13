@@ -1,14 +1,47 @@
 #!/bin/bash
-set -euo pipefail
-/usr/local/bin/sing-box version | head -1
-ip -4 route get 1.1.1.1
-systemctl --no-pager is-active sing-box sing-box-tproxy singbox-rule-ui
-echo 'Rule UI: http://<LAN-IP>:9091'
-echo 'UI 密码文件: /etc/sing-box/rule-ui/token'
-echo '查看密码: cat /etc/sing-box/rule-ui/token'
-echo '配置检查: sing-box check -c /etc/sing-box/config.json'
-echo '日志: journalctl -u sing-box -u singbox-rule-ui -e'
-systemctl --no-pager list-timers update-sing-box-rules.timer monitor-sing-box-runtime.timer
+set -uo pipefail
+
+if [ -x /usr/local/bin/sing-box ]; then
+  /usr/local/bin/sing-box version | head -1 || true
+else
+  echo 'sing-box binary: missing'
+fi
+
+route=$(ip -4 route get 1.1.1.1 2>/dev/null || true)
+lan_ip=$(awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}' <<<"$route")
+if [ -z "$lan_ip" ]; then
+  lan_ip=$(ip -4 -o addr show scope global | awk '{split($4, address, "/"); if (address[1] !~ /^169\.254\./) {print address[1]; exit}}')
+fi
+if [ -n "$lan_ip" ]; then
+  echo "Rule UI: http://$lan_ip:9091"
+else
+  echo 'Rule UI: LAN address unavailable; check the network configuration.'
+fi
+
+token_file=/etc/sing-box/rule-ui/token
+if [ -s "$token_file" ] && [ -r "$token_file" ]; then
+  printf 'UI password/token: %s\n' "$(<"$token_file")"
+else
+  echo "UI password/token: unavailable ($token_file missing or unreadable)"
+fi
+
+echo 'Services:'
+for service in sing-box sing-box-tproxy singbox-rule-ui; do
+  status=$(systemctl is-active "$service" 2>/dev/null || true)
+  printf '  %s: %s\n' "$service" "${status:-unknown}"
+done
+
+echo 'Config check:'
+if [ -x /usr/local/bin/sing-box ]; then
+  /usr/local/bin/sing-box check -c /etc/sing-box/config.json || true
+fi
+echo 'Common commands:'
+echo '  sing-box-gateway-info'
+echo '  systemctl status sing-box sing-box-tproxy singbox-rule-ui'
+echo '  journalctl -u sing-box -u sing-box-tproxy -u singbox-rule-ui -e'
+echo '  sing-box-gateway-uninstall'
+echo 'Logs: journalctl -u sing-box -u singbox-rule-ui -e'
+systemctl --no-pager list-timers update-sing-box-rules.timer monitor-sing-box-runtime.timer || true
 python3 - <<'PY'
 import json
 from pathlib import Path

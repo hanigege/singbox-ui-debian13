@@ -21,6 +21,9 @@ gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$
 mkdir -p "$backup_dir"
 services=(sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer)
+if [ -x /usr/sbin/ifup ] && systemctl cat ifupdown-wait-online.service >/dev/null 2>&1; then
+  services+=(ifupdown-wait-online.service)
+fi
 for service in "${services[@]}"; do
   if systemctl is-active --quiet "$service"; then echo "$service" >> "$backup_dir/active-services"; fi
   if systemctl is-enabled --quiet "$service"; then echo "$service" >> "$backup_dir/enabled-services"; fi
