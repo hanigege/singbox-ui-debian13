@@ -1,4 +1,4 @@
-"""直连失败域名的临时代理学习规则。"""
+"""学习经代理验证可达的直连失败域名。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,9 @@ import re
 
 
 FAILURE_WINDOW_SECONDS = 10 * 60
-FAILURE_THRESHOLD = 3
+FAILURE_THRESHOLD = 1
 PROBE_INTERVAL_SECONDS = 15 * 60
-LEARNED_TTL_SECONDS = 24 * 60 * 60
 MAX_CANDIDATES = 500
-MAX_LEARNED_DOMAINS = 500
 
 DIRECT_FAILURE_RE = re.compile(
     r"\bconnection: open connection to (?P<target>\[[^]]+\]|[^\s]+) "
@@ -102,9 +100,9 @@ def normalize_state(raw: object) -> dict:
         if not domain or not isinstance(item, dict):
             continue
         learned_at = max(0, int(item.get("learnedAt", 0) or 0))
-        expires_at = max(0, int(item.get("expiresAt", 0) or 0))
-        if learned_at and expires_at > learned_at:
-            normalized_learned[domain] = {"learnedAt": learned_at, "expiresAt": expires_at}
+        if learned_at:
+            # 旧状态中的过期时间仅用于迁移；验证通过的域名现在保留到用户手动删除。
+            normalized_learned[domain] = {"learnedAt": learned_at, "expiresAt": 0}
     return {
         "version": 1,
         "enabled": raw.get("enabled") is not False,
@@ -116,6 +114,7 @@ def normalize_state(raw: object) -> dict:
 
 def advance_state(raw_state: dict, failures: list[str], now: int) -> tuple[dict, list[str]]:
     state = normalize_state(raw_state)
+    learned = dict(state["learned"])
     cutoff = now - FAILURE_WINDOW_SECONDS
     candidates = {
         domain: {
@@ -127,7 +126,7 @@ def advance_state(raw_state: dict, failures: list[str], now: int) -> tuple[dict,
     candidates = {domain: item for domain, item in candidates.items() if item["failures"]}
     for domain in failures:
         normalized = normalize_domain(domain)
-        if not normalized:
+        if not normalized or normalized in learned:
             continue
         item = candidates.setdefault(normalized, {"failures": [], "lastProbeAt": 0})
         item["failures"] = [stamp for stamp in item["failures"] if stamp >= cutoff]
@@ -135,11 +134,6 @@ def advance_state(raw_state: dict, failures: list[str], now: int) -> tuple[dict,
         item["failures"] = item["failures"][-FAILURE_THRESHOLD:]
     if len(candidates) > MAX_CANDIDATES:
         candidates = dict(sorted(candidates.items(), key=lambda pair: pair[1]["failures"][-1], reverse=True)[:MAX_CANDIDATES])
-    learned = {
-        domain: item
-        for domain, item in state["learned"].items()
-        if item["expiresAt"] > now
-    }
     next_state = {**state, "candidates": candidates, "learned": learned}
     ready = []
     if state["enabled"]:
@@ -162,6 +156,6 @@ def record_probe(raw_state: dict, domain: str, now: int, succeeded: bool) -> dic
     candidates[normalized] = item
     learned = dict(state["learned"])
     if succeeded:
-        learned[normalized] = {"learnedAt": now, "expiresAt": now + LEARNED_TTL_SECONDS}
-        learned = dict(sorted(learned.items(), key=lambda pair: pair[1]["learnedAt"], reverse=True)[:MAX_LEARNED_DOMAINS])
+        learned[normalized] = {"learnedAt": now, "expiresAt": 0}
+        candidates.pop(normalized, None)
     return {**state, "candidates": candidates, "learned": learned}

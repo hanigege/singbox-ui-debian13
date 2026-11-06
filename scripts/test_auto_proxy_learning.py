@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "singbox-rule-ui"))
 
 import app
-from auto_proxy_learning import advance_state, empty_state, normalize_domain, parse_direct_network_failure, record_probe
+from auto_proxy_learning import advance_state, empty_state, normalize_domain, normalize_state, parse_direct_network_failure, record_probe
 
 
 class AutoProxyLearningTests(unittest.TestCase):
@@ -27,20 +27,39 @@ class AutoProxyLearningTests(unittest.TestCase):
         self.assertIsNone(normalize_domain("printer.local"))
         self.assertIsNone(normalize_domain("localhost"))
 
-    def test_three_recent_direct_failures_trigger_a_probe(self):
+    def test_one_direct_failure_triggers_a_proxy_probe(self):
         state = empty_state()
-        state, ready = advance_state(state, ["blocked.example.com"] * 2, 1000)
-        self.assertEqual(ready, [])
-        state, ready = advance_state(state, ["blocked.example.com"], 1100)
+        state, ready = advance_state(state, ["blocked.example.com"], 1000)
         self.assertEqual(ready, ["blocked.example.com"])
-        state = record_probe(state, "blocked.example.com", 1100, True)
-        self.assertEqual(state["learned"]["blocked.example.com"]["expiresAt"], 1100 + 24 * 60 * 60)
-        state, ready = advance_state(state, ["blocked.example.com"], 1101)
+        state = record_probe(state, "blocked.example.com", 1000, True)
+        self.assertEqual(state["learned"]["blocked.example.com"]["expiresAt"], 0)
+        state, ready = advance_state(state, [], 1000 + 365 * 24 * 60 * 60)
         self.assertEqual(ready, [])
+        self.assertIn("blocked.example.com", state["learned"])
+
+    def test_legacy_expiring_entries_migrate_to_permanent(self):
+        state = normalize_state({
+            "version": 1,
+            "enabled": True,
+            "cursor": None,
+            "candidates": {},
+            "learned": {"blocked.example.com": {"learnedAt": 1000, "expiresAt": 87400}},
+        })
+        self.assertEqual(state["learned"]["blocked.example.com"]["expiresAt"], 0)
+
+    def test_learned_domains_are_not_evicted_by_a_count_limit(self):
+        state = empty_state()
+        state["learned"] = {
+            f"d{index:04}.example.net": {"learnedAt": index + 1, "expiresAt": 0}
+            for index in range(500)
+        }
+        state = record_probe(state, "new.example.net", 1000, True)
+        self.assertEqual(len(state["learned"]), 501)
+        self.assertIn("d0000.example.net", state["learned"])
 
     def test_candidates_expire_after_the_failure_window(self):
         state = empty_state()
-        state, _ = advance_state(state, ["blocked.example.com"] * 2, 1000)
+        state, _ = advance_state(state, ["blocked.example.com"], 1000)
         state, ready = advance_state(state, [], 1000 + 10 * 60 + 1)
         self.assertEqual(ready, [])
         self.assertNotIn("blocked.example.com", state["candidates"])
@@ -64,22 +83,26 @@ class AutoProxyLearningTests(unittest.TestCase):
                 {"rule_set": "geosite-geolocation-cn", "outbound": "direct"},
             ]},
         }
-        lists = {
-            "whitelist": [{"type": "domain_suffix", "value": "trusted.example.com"}],
-            "ddns": [{"type": "domain_suffix", "value": "lan.example.com"}],
-            "blacklist": [],
-            "greylist": [],
-        }
-        domains = ["blocked.example.com", "www.trusted.example.com", "router.lan.example.com"]
-        app.apply_auto_proxy_domain_rules(config, domains, {"fakeip": {"ipv6_enabled": False}}, lists)
+        app.apply_auto_proxy_domain_rules(config, {"fakeip": {"ipv6_enabled": False}})
         route = config["route"]["rules"]
-        auto_rule = next(rule for rule in route if rule.get("domain") == ["blocked.example.com"])
+        auto_rule = next(rule for rule in route if rule.get("rule_set") == app.AUTO_PROXY_RULE_SET_TAG)
         self.assertLess(route.index(route[4]), route.index(auto_rule))
         self.assertEqual(route[route.index(auto_rule) + 1]["rule_set"], "geosite-telegram")
         dns = config["dns"]["rules"]
-        auto_dns = next(rule for rule in dns if rule.get("domain") == ["blocked.example.com"])
+        auto_dns = next(rule for rule in dns if rule.get("rule_set") == app.AUTO_PROXY_RULE_SET_TAG)
         self.assertEqual(auto_dns["query_type"], ["A"])
         self.assertLess(dns.index(dns[3]), dns.index(auto_dns))
+
+    def test_auto_rule_set_uses_sing_box_source_format(self):
+        path = Path(__file__).resolve().parent / "auto-proxy-test.json"
+        try:
+            app.write_auto_proxy_rule_set(["RFA.org", "www.rfa.org"], path)
+            self.assertEqual(app.load_json(path, {}), {
+                "version": 5,
+                "rules": [{"domain": ["rfa.org", "www.rfa.org"]}],
+            })
+        finally:
+            path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

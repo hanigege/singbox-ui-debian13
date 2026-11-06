@@ -145,11 +145,16 @@ const translations = {
     maintenanceNote: "Rule-set updates and TProxy status",
     autoProxyLearningTitle: "Automatic proxy learning",
     autoProxyLearningStatus: "Learning status",
-    autoProxyLearnedCount: "Temporary proxy domains",
+    autoProxyLearnedCount: "Learned proxy domains",
     autoProxyCandidateCount: "Pending candidates",
-    autoProxyLearnedDomains: "Learned domains",
-    autoProxyNoDomains: "No temporary domains learned",
-    autoProxyLearningHelp: "Domains are added after repeated direct HTTPS failures and a successful proxy check. Temporary rules expire after 24 hours; manual routing rules keep priority.",
+    autoProxyLearnedDomains: "Learned domains (kept until removed)",
+    autoProxyNoDomains: "No domains learned",
+    autoProxyLearningHelp: "After a direct HTTPS connection fails, the selected proxy is tested. Reachable domains are kept until you remove them. Manual routing rules keep priority.",
+    autoProxyDeleteDomain: "Delete",
+    autoProxyClearLearnedDomains: "Clear all learned domains",
+    autoProxyClearConfirm: "Remove all learned proxy domains?",
+    autoProxyDomainRemoved: "Learned proxy domain removed",
+    autoProxyDomainsCleared: "Learned proxy domains cleared",
     backupTitle: "Backup and restore",
     backupNote: "Export or restore the UI-managed rules, nodes, and routing settings.",
     changeTokenTitle: "Change access token",
@@ -489,11 +494,16 @@ const translations = {
     maintenanceNote: "规则集更新与 TProxy 状态",
     autoProxyLearningTitle: "自动代理学习",
     autoProxyLearningStatus: "学习状态",
-    autoProxyLearnedCount: "临时代理域名数",
+    autoProxyLearnedCount: "已学习代理域名数",
     autoProxyCandidateCount: "待验证候选数",
-    autoProxyLearnedDomains: "已学习域名",
-    autoProxyNoDomains: "暂无临时域名",
-    autoProxyLearningHelp: "域名在多次直连 HTTPS 失败且经代理验证可达后加入。临时规则 24 小时后过期；手动分流规则优先。",
+    autoProxyLearnedDomains: "已学习域名（删除前长期保留）",
+    autoProxyNoDomains: "暂无已学习域名",
+    autoProxyLearningHelp: "直连 HTTPS 失败后会探测当前代理；经代理可达的域名会保留，直到你手动删除。手动分流规则优先。",
+    autoProxyDeleteDomain: "删除",
+    autoProxyClearLearnedDomains: "清空所有已学习域名",
+    autoProxyClearConfirm: "确定清空所有已学习的代理域名吗？",
+    autoProxyDomainRemoved: "已删除学习域名",
+    autoProxyDomainsCleared: "已清空学习域名",
     backupTitle: "备份与恢复",
     backupNote: "导出或恢复 UI 管理的规则、节点和分流设置。",
     changeTokenTitle: "修改访问密码",
@@ -1377,6 +1387,87 @@ function renderMaintenanceDetails(titleText, items, note = "") {
   return details;
 }
 
+function renderAutoProxyLearningDetails(learning = {}) {
+  const details = document.createElement("details");
+  details.className = "maintenance-details";
+  const summary = document.createElement("summary");
+  const title = document.createElement("span");
+  title.className = "maintenance-summary-title";
+  title.textContent = t("autoProxyLearningTitle");
+  summary.appendChild(title);
+  details.appendChild(summary);
+
+  const body = document.createElement("div");
+  body.className = "maintenance-details-body";
+  const learnedDomains = Array.isArray(learning.learnedDomains) ? learning.learnedDomains : [];
+  body.appendChild(renderMaintenanceItem(t("autoProxyLearningStatus"), learning.enabled ? t("enabled") : t("disabled"), learning.enabled ? "good" : "warn"));
+  body.appendChild(renderMaintenanceItem(t("autoProxyLearnedCount"), String(learning.learnedCount ?? learnedDomains.length)));
+  body.appendChild(renderMaintenanceItem(t("autoProxyCandidateCount"), String(learning.candidateCount ?? 0)));
+
+  const listLabel = document.createElement("h4");
+  listLabel.textContent = t("autoProxyLearnedDomains");
+  body.appendChild(listLabel);
+  if (!learnedDomains.length) {
+    body.appendChild(renderMaintenanceItem(t("autoProxyLearnedDomains"), t("autoProxyNoDomains")));
+  }
+  for (const domain of learnedDomains) {
+    const row = document.createElement("div");
+    row.className = "maintenance-item auto-proxy-domain-row";
+    const value = document.createElement("strong");
+    value.textContent = domain;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "secondary-btn";
+    remove.textContent = t("autoProxyDeleteDomain");
+    remove.setAttribute("aria-label", `${t("autoProxyDeleteDomain")} ${domain}`);
+    remove.addEventListener("click", () => removeAutoProxyDomain(domain));
+    row.append(value, remove);
+    body.appendChild(row);
+  }
+  if (learnedDomains.length) {
+    const actions = document.createElement("div");
+    actions.className = "auto-proxy-learning-actions";
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "secondary-btn";
+    clear.textContent = t("autoProxyClearLearnedDomains");
+    clear.addEventListener("click", clearAutoProxyDomains);
+    actions.appendChild(clear);
+    body.appendChild(actions);
+  }
+  const note = document.createElement("p");
+  note.className = "maintenance-note";
+  note.textContent = t("autoProxyLearningHelp");
+  body.appendChild(note);
+  details.appendChild(body);
+  return details;
+}
+
+async function updateLearnedDomains(path, body, successMessage) {
+  setBusy(true);
+  setStatus(t("refreshingMaintenance"));
+  try {
+    const result = await api(path, { method: "POST", body: JSON.stringify(body) });
+    maintenance = result.maintenance || maintenance;
+    if (result.state) state = result.state;
+    render();
+    setStatus(successMessage, "ok");
+  } catch (error) {
+    setStatus(error.message, "bad");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function removeAutoProxyDomain(domain) {
+  return updateLearnedDomains("/api/auto-proxy-learning/remove", { domain }, t("autoProxyDomainRemoved"));
+}
+
+function clearAutoProxyDomains() {
+  if (!window.confirm(t("autoProxyClearConfirm"))) return;
+  return updateLearnedDomains("/api/auto-proxy-learning/clear", {}, t("autoProxyDomainsCleared"));
+}
+
 function formatLocalDateTime(unixSeconds, fallback = "") {
   const timestamp = Number(unixSeconds);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return fallback;
@@ -1456,14 +1547,7 @@ function renderMaintenance() {
   overview.insertBefore(renderHealthSummaryBanner(configHealth), overview.children[1] || null);
   rows.appendChild(overview);
 
-  const learning = info.autoProxyLearning || {};
-  const learnedDomains = Array.isArray(learning.learnedDomains) ? learning.learnedDomains : [];
-  rows.appendChild(renderMaintenanceDetails(t("autoProxyLearningTitle"), [
-    [t("autoProxyLearningStatus"), learning.enabled ? t("enabled") : t("disabled"), learning.enabled ? "good" : "warn"],
-    [t("autoProxyLearnedCount"), String(learning.learnedCount ?? learnedDomains.length)],
-    [t("autoProxyCandidateCount"), String(learning.candidateCount ?? 0)],
-    [t("autoProxyLearnedDomains"), learnedDomains.length ? learnedDomains : [t("autoProxyNoDomains")]],
-  ], t("autoProxyLearningHelp")));
+  rows.appendChild(renderAutoProxyLearningDetails(info.autoProxyLearning || {}));
 
   // 维护页按折叠分组纵向排列，标题只保留箭头和名称，避免右侧状态字干扰扫读。
   rows.appendChild(renderMaintenanceDetails(t("tproxyDetailsTitle"), [

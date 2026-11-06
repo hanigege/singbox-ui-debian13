@@ -960,6 +960,19 @@ button[data-i18n="updateRules"] {
   border-bottom: none;
 }
 
+.auto-proxy-domain-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auto-proxy-learning-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .maintenance-details {
   margin-top: 8px;
 }

@@ -1,9 +1,9 @@
 [Unit]
-Description=Check for repeated direct connection failures every five minutes
+Description=Check for direct connection failures every minute
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=5min
+OnBootSec=1min
+OnUnitActiveSec=1min
 Persistent=true
 Unit=sing-box-auto-proxy-learning.service
 

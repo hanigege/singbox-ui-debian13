@@ -138,12 +138,12 @@ def run_tick(dry_run=False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="学习多次直连失败且经当前代理验证可达的域名")
+    parser = argparse.ArgumentParser(description="学习直连失败且经当前代理验证可达的域名")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--enable", action="store_true", help="启用自动学习")
-    group.add_argument("--disable", action="store_true", help="暂停学习，已有临时规则保留至过期")
+    group.add_argument("--disable", action="store_true", help="暂停学习，已有规则保留")
     group.add_argument("--clear", action="store_true", help="清空已学习规则并停止候选统计")
-    group.add_argument("--status", action="store_true", help="显示开关和临时代理域名")
+    group.add_argument("--status", action="store_true", help="显示开关和已学习代理域名")
     parser.add_argument("--dry-run", action="store_true", help="只分析新日志并探测，不保存状态或改配置")
     args = parser.parse_args()
     if args.enable or args.disable or args.clear or args.status:
