@@ -20,7 +20,7 @@ apt-get install -y --no-install-recommends ca-certificates curl python3 nftables
 gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$
 mkdir -p "$backup_dir"
-services=(sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer)
+services=(sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer)
 if [ -x /usr/sbin/ifup ] && systemctl cat ifupdown-wait-online.service >/dev/null 2>&1; then
   services+=(ifupdown-wait-online.service)
 fi
@@ -30,7 +30,7 @@ for service in "${services[@]}"; do
 done
 paths=(etc/sing-box opt/singbox-rule-ui usr/local/bin/sing-box usr/local/lib/sing-box etc/default/singbox-gateway etc/sysctl.d/99-sing-box-tproxy.conf etc/logrotate.d/sing-box-gateway etc/systemd/system/update-sing-box-rules.timer.d)
 for unit in "$PROJECT_DIR"/systemd/*; do paths+=("etc/systemd/system/$(basename "$unit")"); done
-for helper in refresh-sing-box-runtime-config monitor-sing-box-runtime update-sing-box-rules-jsdelivr refresh-sing-box-tproxy-setup sing-box-tproxy-setup stop-sing-box-tproxy; do paths+=("usr/local/sbin/$helper"); done
+for helper in refresh-sing-box-runtime-config monitor-sing-box-runtime sing-box-auto-proxy-learn update-sing-box-rules-jsdelivr refresh-sing-box-tproxy-setup sing-box-tproxy-setup stop-sing-box-tproxy; do paths+=("usr/local/sbin/$helper"); done
 for helper in sing-box-gateway-info sing-box-gateway-uninstall; do paths+=("usr/local/bin/$helper"); done
 for path in "${paths[@]}"; do
   if [ -e "/$path" ]; then echo "$path" >> "$backup_dir/paths"; fi
@@ -92,6 +92,7 @@ fi
 rsync -a --exclude __pycache__ "$PROJECT_DIR/singbox-rule-ui/" /opt/singbox-rule-ui/
 install -m 0755 "$PROJECT_DIR/scripts/refresh_runtime_config.py" /usr/local/sbin/refresh-sing-box-runtime-config
 install -m 0755 "$PROJECT_DIR/scripts/monitor_runtime.py" /usr/local/sbin/monitor-sing-box-runtime
+install -m 0755 "$PROJECT_DIR/scripts/auto_proxy_learn.py" /usr/local/sbin/sing-box-auto-proxy-learn
 install -m 0755 "$PROJECT_DIR/scripts/sync_tproxy_setup.py" /usr/local/sbin/refresh-sing-box-tproxy-setup
 install -m 0755 "$PROJECT_DIR/scripts/update-sing-box-rules-jsdelivr" /usr/local/sbin/update-sing-box-rules-jsdelivr
 install -m 0755 "$PROJECT_DIR/scripts/stop-sing-box-tproxy" /usr/local/sbin/stop-sing-box-tproxy
@@ -118,7 +119,7 @@ systemctl daemon-reload
 systemd-analyze verify "$PROJECT_DIR"/systemd/*
 systemctl enable "${services[@]}"
 systemctl restart sing-box-tproxy sing-box singbox-rule-ui
-systemctl start update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer
+systemctl start update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer
 python3 "$PROJECT_DIR/scripts/health_check.py"
 cp "$PROJECT_DIR/versions.json" /etc/sing-box/manager/installed-version.json
 echo "安装完成。备份: $backup_dir"

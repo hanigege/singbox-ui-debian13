@@ -4,7 +4,7 @@ test "$(id -u)" = 0 || { echo '请使用 root 执行。' >&2; exit 1; }
 backup_dir=/var/backups/singbox-ui/uninstall-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$backup_dir"
 if [ -d /etc/sing-box ]; then tar -C /etc -cpf "$backup_dir/config.tar" sing-box; fi
-units=(monitor-sing-box-runtime.timer update-sing-box-rules.timer sing-box-logrotate.timer singbox-rule-ui.service sing-box.service sing-box-tproxy.service monitor-sing-box-runtime.service update-sing-box-rules.service sing-box-logrotate.service)
+units=(monitor-sing-box-runtime.timer update-sing-box-rules.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer singbox-rule-ui.service sing-box.service sing-box-tproxy.service monitor-sing-box-runtime.service update-sing-box-rules.service sing-box-logrotate.service sing-box-auto-proxy-learning.service)
 for unit in "${units[@]}"; do
   if systemctl cat "$unit" >/dev/null 2>&1; then
     systemctl stop "$unit"

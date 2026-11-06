@@ -1,0 +1,9 @@
+[Unit]
+Description=Learn domains blocked on direct connections and route verified ones through Proxy
+After=network-online.target sing-box.service
+ConditionPathExists=/etc/sing-box/config.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sing-box-auto-proxy-learn
+TimeoutStartSec=180

@@ -143,6 +143,13 @@ const translations = {
     telegramCidrUpdateFailed: "Telegram IP range update failed. Existing list is still in use.",
     maintenance: "Maintenance",
     maintenanceNote: "Rule-set updates and TProxy status",
+    autoProxyLearningTitle: "Automatic proxy learning",
+    autoProxyLearningStatus: "Learning status",
+    autoProxyLearnedCount: "Temporary proxy domains",
+    autoProxyCandidateCount: "Pending candidates",
+    autoProxyLearnedDomains: "Learned domains",
+    autoProxyNoDomains: "No temporary domains learned",
+    autoProxyLearningHelp: "Domains are added after repeated direct HTTPS failures and a successful proxy check. Temporary rules expire after 24 hours; manual routing rules keep priority.",
     backupTitle: "Backup and restore",
     backupNote: "Export or restore the UI-managed rules, nodes, and routing settings.",
     changeTokenTitle: "Change access token",
@@ -480,6 +487,13 @@ const translations = {
     telegramCidrUpdateFailed: "Telegram IP 网段更新失败，旧列表仍在使用。",
     maintenance: "维护",
     maintenanceNote: "规则集更新与 TProxy 状态",
+    autoProxyLearningTitle: "自动代理学习",
+    autoProxyLearningStatus: "学习状态",
+    autoProxyLearnedCount: "临时代理域名数",
+    autoProxyCandidateCount: "待验证候选数",
+    autoProxyLearnedDomains: "已学习域名",
+    autoProxyNoDomains: "暂无临时域名",
+    autoProxyLearningHelp: "域名在多次直连 HTTPS 失败且经代理验证可达后加入。临时规则 24 小时后过期；手动分流规则优先。",
     backupTitle: "备份与恢复",
     backupNote: "导出或恢复 UI 管理的规则、节点和分流设置。",
     changeTokenTitle: "修改访问密码",
@@ -1441,6 +1455,15 @@ function renderMaintenance() {
   ]);
   overview.insertBefore(renderHealthSummaryBanner(configHealth), overview.children[1] || null);
   rows.appendChild(overview);
+
+  const learning = info.autoProxyLearning || {};
+  const learnedDomains = Array.isArray(learning.learnedDomains) ? learning.learnedDomains : [];
+  rows.appendChild(renderMaintenanceDetails(t("autoProxyLearningTitle"), [
+    [t("autoProxyLearningStatus"), learning.enabled ? t("enabled") : t("disabled"), learning.enabled ? "good" : "warn"],
+    [t("autoProxyLearnedCount"), String(learning.learnedCount ?? learnedDomains.length)],
+    [t("autoProxyCandidateCount"), String(learning.candidateCount ?? 0)],
+    [t("autoProxyLearnedDomains"), learnedDomains.length ? learnedDomains : [t("autoProxyNoDomains")]],
+  ], t("autoProxyLearningHelp")));
 
   // 维护页按折叠分组纵向排列，标题只保留箭头和名称，避免右侧状态字干扰扫读。
   rows.appendChild(renderMaintenanceDetails(t("tproxyDetailsTitle"), [

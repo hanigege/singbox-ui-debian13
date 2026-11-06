@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
+from auto_proxy_learning import empty_state, normalize_domain, normalize_state
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,6 +29,7 @@ CLASH_API_SECRET = os.environ.get("RULE_UI_CLASH_API_SECRET", "")
 BASE_CONFIG_PATH = MANAGER_DIR / "base.json"
 NODES_PATH = MANAGER_DIR / "nodes.json"
 GROUPS_PATH = MANAGER_DIR / "groups.json"
+AUTO_PROXY_STATE_PATH = MANAGER_DIR / "auto-proxy-learning.json"
 BACKUP_DIR = MANAGER_DIR / "backups"
 BACKUP_RETENTION = 20
 RULE_UPDATE_LAST_PATH = MANAGER_DIR / "rule-update-last.json"
@@ -925,6 +927,8 @@ def extract_initial_manager_data(config):
 
 def ensure_manager_data():
     ensure_dirs()
+    if not AUTO_PROXY_STATE_PATH.exists():
+        write_json(AUTO_PROXY_STATE_PATH, empty_state())
     if BASE_CONFIG_PATH.exists() and NODES_PATH.exists() and GROUPS_PATH.exists():
         return
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -940,6 +944,16 @@ def ensure_manager_data():
 def load_nodes():
     ensure_manager_data()
     return normalize_nodes(load_json(NODES_PATH, []))
+
+
+def load_auto_proxy_state():
+    ensure_manager_data()
+    return normalize_state(load_json(AUTO_PROXY_STATE_PATH, empty_state()))
+
+
+def load_auto_proxy_domains(state=None):
+    state = normalize_state(state if state is not None else load_auto_proxy_state())
+    return sorted(state["learned"])
 
 
 def load_groups():
@@ -1016,7 +1030,7 @@ def apply_routing_mark(outbound):
     return outbound
 
 
-def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=None):
+def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=None, auto_proxy_domains=None):
     ensure_manager_data()
     nodes = normalize_nodes(nodes if nodes is not None else load_nodes())
     groups = groups or load_groups()
@@ -1042,6 +1056,12 @@ def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=N
     apply_direct_speedtest_route(config)
     apply_direct_telegram_route(config)
     apply_fakeip_quic_policy(config, groups)
+    apply_auto_proxy_domain_rules(
+        config,
+        load_auto_proxy_domains() if auto_proxy_domains is None else auto_proxy_domains,
+        groups,
+        normalized_lists or {name: read_entries(name) for name in LISTS},
+    )
     apply_route_final_policy(config)
     proxy_default = groups.get("proxy", {}).get("default", "Auto")
     if proxy_default not in {"Auto", *tags}:
@@ -1670,6 +1690,83 @@ def apply_greylist_dns_fakeip(config, groups=None):
             "query_type": query_types,
         },
     )
+
+
+def auto_domain_matches_entry(domain, entry):
+    kind = entry.get("type")
+    value = str(entry.get("value", "")).lower()
+    if not value:
+        return False
+    if kind == "domain":
+        if "*" in value:
+            return re.fullmatch(re.escape(value).replace(r"\*", ".*"), domain) is not None
+        return domain == value
+    if kind == "domain_suffix":
+        return domain == value or domain.endswith("." + value)
+    if kind == "domain_keyword":
+        return value in domain
+    if kind == "domain_regex":
+        try:
+            return re.search(value, domain, re.IGNORECASE) is not None
+        except re.error:
+            return False
+    return False
+
+
+def auto_proxy_domains_for_lists(domains, normalized_lists):
+    normalized = []
+    for raw_domain in domains:
+        domain = normalize_domain(str(raw_domain))
+        if not domain:
+            raise ValueError(f"Invalid automatically learned domain: {raw_domain}")
+        if any(
+            auto_domain_matches_entry(domain, item)
+            for name in ("whitelist", "ddns")
+            for item in normalized_lists.get(name, [])
+        ):
+            continue
+        normalized.append(domain)
+    return sorted(set(normalized))
+
+
+def rule_has_managed_set(rule, tags):
+    value = rule.get("rule_set")
+    if isinstance(value, str):
+        return value in tags
+    if isinstance(value, list):
+        return any(item in tags for item in value)
+    return False
+
+
+def apply_auto_proxy_domain_rules(config, domains, groups=None, normalized_lists=None):
+    normalized_lists = normalized_lists or {name: read_entries(name) for name in LISTS}
+    domains = auto_proxy_domains_for_lists(domains, normalized_lists)
+    if not domains:
+        return
+
+    dns_rules = config.setdefault("dns", {}).setdefault("rules", [])
+    dns_rule = {
+        "domain": domains,
+        "action": "route",
+        "server": "fakeip-dns",
+        "rewrite_ttl": 60,
+        "query_type": fakeip_query_types(groups),
+    }
+    dns_insert_at = 0
+    for index, rule in enumerate(dns_rules):
+        if isinstance(rule, dict) and rule_has_managed_set(
+            rule,
+            {CUSTOM_TAGS["blacklist"], CUSTOM_TAGS["whitelist"], CUSTOM_TAGS["greylist"], CUSTOM_TAGS["ddns"]},
+        ):
+            dns_insert_at = index + 1
+    dns_rules.insert(dns_insert_at, dns_rule)
+
+    route_rules = config.setdefault("route", {}).setdefault("rules", [])
+    route_insert_at = 0
+    for index, rule in enumerate(route_rules):
+        if isinstance(rule, dict) and rule_has_managed_set(rule, {"geosite-speedtest", *CUSTOM_TAGS.values()}):
+            route_insert_at = index + 1
+    route_rules.insert(route_insert_at, {"domain": domains, "outbound": "Proxy"})
 
 
 def fakeip_query_types(groups=None):
@@ -2919,6 +3016,16 @@ def sync_tproxy(nodes=None, groups=None, normalized_lists=None):
     return {"code": code, "stdout": restart["stdout"], "stderr": restart["stderr"], "service": status, "sets": sets, "radvd": radvd}
 
 
+def auto_proxy_learning_summary():
+    state = load_auto_proxy_state()
+    return {
+        "enabled": state["enabled"],
+        "learnedCount": len(state["learned"]),
+        "learnedDomains": sorted(state["learned"]),
+        "candidateCount": len(state["candidates"]),
+    }
+
+
 def maintenance_status():
     rule_logs = recent_unit_logs(RULE_UPDATE_SERVICE, 100)
     last_manual = load_json(RULE_UPDATE_LAST_PATH, {})
@@ -2937,6 +3044,7 @@ def maintenance_status():
     next_update = next_rule_update_time(schedule)
     telegram_cidr = load_telegram_cidr_data()
     return {
+        "autoProxyLearning": auto_proxy_learning_summary(),
         "ruleUpdate": {
             "script": str(RULE_UPDATE_SCRIPT),
             "scriptExists": RULE_UPDATE_SCRIPT.exists(),
@@ -3721,7 +3829,7 @@ def write_rule_files(target_dir, normalized_lists):
         write_json(target_dir / f"{name}.json", entries_to_rule_set(entries))
 
 
-def staged_check(normalized_lists, nodes=None, groups=None):
+def staged_check(normalized_lists, nodes=None, groups=None, auto_proxy_domains=None):
     ensure_dirs()
     try:
         validate_greylist_ip_cidrs(normalized_lists.get("greylist", []), nodes=nodes, groups=groups)
@@ -3732,7 +3840,13 @@ def staged_check(normalized_lists, nodes=None, groups=None):
         staged_dir = Path(temp_name)
         write_rule_files(staged_dir, normalized_lists)
         try:
-            config = render_config(nodes=nodes, groups=groups, rule_dir=staged_dir, normalized_lists=normalized_lists)
+            config = render_config(
+                nodes=nodes,
+                groups=groups,
+                rule_dir=staged_dir,
+                normalized_lists=normalized_lists,
+                auto_proxy_domains=auto_proxy_domains,
+            )
             validate_outbound_references(config)
         except Exception as exc:
             return {"code": 1, "stdout": "", "stderr": str(exc)}
@@ -3769,6 +3883,58 @@ def apply_all(normalized_lists, nodes, groups):
         rollback_apply(result)
         raise
     return result
+
+
+def apply_auto_proxy_state(raw_state):
+    state = normalize_state(raw_state)
+    previous = load_auto_proxy_state()
+    previous_domains = load_auto_proxy_domains(previous)
+    domains = load_auto_proxy_domains(state)
+    if domains == previous_domains:
+        write_json(AUTO_PROXY_STATE_PATH, state)
+        return {"ok": True, "changed": False, "domains": domains}
+
+    normalized_lists = {name: read_entries(name) for name in LISTS}
+    nodes = load_nodes()
+    groups = load_groups()
+    check = staged_check(normalized_lists, nodes=nodes, groups=groups, auto_proxy_domains=domains)
+    if check["code"] != 0:
+        return {"ok": False, "changed": False, "error": "Config check failed; learned routes were not applied.", "check": check}
+
+    previous_state = backup_manager_file(AUTO_PROXY_STATE_PATH)
+    previous_config = backup_manager_file(CONFIG_PATH)
+    try:
+        write_json(AUTO_PROXY_STATE_PATH, state)
+        config = render_config(
+            nodes=nodes,
+            groups=groups,
+            normalized_lists=normalized_lists,
+            auto_proxy_domains=domains,
+        )
+        write_json(CONFIG_PATH, config)
+        config_check = check_config()
+        if config_check["code"] != 0:
+            restore_file(AUTO_PROXY_STATE_PATH, previous_state)
+            restore_file(CONFIG_PATH, previous_config)
+            return {"ok": False, "changed": False, "error": "Saved config check failed; previous config was restored.", "check": config_check}
+        restart = restart_sing_box()
+        if restart["code"] != 0 or service_status() != "active":
+            restore_file(AUTO_PROXY_STATE_PATH, previous_state)
+            restore_file(CONFIG_PATH, previous_config)
+            rollback_restart = restart_sing_box()
+            return {
+                "ok": False,
+                "changed": False,
+                "error": "Restart failed; previous learned routes and config were restored.",
+                "check": check,
+                "restart": restart,
+                "rollback": {"restart": rollback_restart, "service": service_status()},
+            }
+        return {"ok": True, "changed": True, "domains": domains, "check": check, "restart": restart}
+    except Exception:
+        restore_file(AUTO_PROXY_STATE_PATH, previous_state)
+        restore_file(CONFIG_PATH, previous_config)
+        raise
 
 
 def apply_proxy_default(tag):
@@ -3928,6 +4094,7 @@ def load_state():
         "lists": lists,
         "nodes": load_nodes(),
         "groups": load_groups(),
+        "autoProxyLearning": auto_proxy_learning_summary(),
         "meta": {
             "ruleDir": str(RULE_DIR),
             "managerDir": str(MANAGER_DIR),
