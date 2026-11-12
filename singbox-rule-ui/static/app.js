@@ -2841,6 +2841,12 @@ function buildNodeFromForm() {
       insecure: $("nodeInsecure").checked,
     },
   };
+  // sing-box 有多组 DNS 时，域名节点需明确选择解析器；节点域名用直连的本地 DNS 解析。
+  if (type === "socks") {
+    delete outbound.domain_resolver;
+  } else if (!outbound.domain_resolver) {
+    outbound.domain_resolver = "local-dns";
+  }
   const secret = $("nodeSecret").value.trim();
   const obfsPassword = $("nodeObfs").value.trim();
   const publicKey = $("nodePublicKey").value.trim();
