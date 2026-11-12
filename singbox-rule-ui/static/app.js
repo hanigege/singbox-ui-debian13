@@ -3381,3 +3381,30 @@ setStatus(t("ready"));
 updateButtons();
 load();
 setInterval(refreshMeta, 5000);
+
+// 背景场景和时钟按浏览器本地时间更新，不依赖服务端时区。
+(() => {
+  // 四个时段使用 NASA ISS 实拍背景，随本地静态文件提供。
+  const scenes = [
+    { start: 6, end: 10, label: "晨光", image: "/scene-dawn.jpg" },
+    { start: 10, end: 16, label: "白昼", image: "/scene-day.jpg" },
+    { start: 16, end: 19, label: "暮色", image: "/scene-dusk.jpg" },
+    { start: 19, end: 30, label: "星夜", image: "/scene-night.jpg" },
+  ];
+  const updateScene = () => {
+    const now = new Date();
+    const hour = now.getHours();
+    const scene = scenes.find(({ start, end }) => hour >= start && hour < end) || scenes[3];
+    if (document.body.dataset.scene !== scene.label) {
+      document.body.dataset.scene = scene.label;
+      document.body.style.setProperty("--scene-image", `url("${scene.image}")`);
+    }
+    const clock = document.getElementById("sceneTime");
+    if (clock) {
+      const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+      clock.textContent = `${scene.label} · ${time}`;
+    }
+  };
+  updateScene();
+  window.setInterval(updateScene, 60_000);
+})();

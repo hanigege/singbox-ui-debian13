@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sing-box</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20261113-orbit-v2" />
   </head>
   <body>
+    <div class="earth-globe" aria-hidden="true"><div class="earth-globe-map"></div></div>
     <main class="shell">
       <header class="topbar">
         <div>
@@ -35,7 +36,6 @@
       <section id="app" class="workspace hidden">
         <nav class="tabs" aria-label="Rule lists">
           <button class="tab active" data-list="nodes" type="button"></button>
-          <button class="tab" data-list="runtime" type="button"></button>
           <button class="tab" data-list="whitelist" type="button"></button>
           <button class="tab" data-list="blacklist" type="button"></button>
           <button class="tab" data-list="greylist" type="button"></button>
@@ -322,6 +322,6 @@
         </section>
       </section>
     </main>
-    <script src="/app.js?v=20261106-auto-proxy-hot-reload"></script>
+    <script src="/app.js?v=20261113-orbit-v2"></script>
   </body>
 </html>
