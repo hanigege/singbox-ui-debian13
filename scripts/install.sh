@@ -58,24 +58,9 @@ rollback() {
 }
 trap rollback EXIT
 
-# 固定官方资产和校验值，不跟随 latest 自动改变二进制。
+# 按当前架构校验并提取仓库内的官方原始归档，缺失或损坏时直接拒装。
 arch=$(dpkg --print-architecture)
-readarray -t asset < <(python3 - "$PROJECT_DIR/versions.json" "$arch" <<'PY'
-import json
-import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-asset = data["assets"][sys.argv[2]]
-print(data["version"])
-print(asset["url"])
-print(asset["sha256"])
-PY
-)
-test "${#asset[@]}" = 3 || { echo "不支持架构: $arch" >&2; exit 1; }
-binary_prefix=${SING_BOX_DOWNLOAD_PREFIX-${GITHUB_DOWNLOAD_PREFIX:-}}
-curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 "${binary_prefix}${asset[1]}" -o "$gateway_tmp/sing-box.tar.gz"
-echo "${asset[2]}  $gateway_tmp/sing-box.tar.gz" | sha256sum -c -
-mkdir "$gateway_tmp/binary"
-tar -xzf "$gateway_tmp/sing-box.tar.gz" -C "$gateway_tmp/binary" --strip-components=1
+python3 "$PROJECT_DIR/scripts/bundled_assets.py" --arch "$arch" --destination "$gateway_tmp/binary"
 "$gateway_tmp/binary/sing-box" version
 mkdir -p /usr/local/bin /usr/local/sbin /usr/local/lib/sing-box /opt/singbox-rule-ui /etc/sing-box/manager /etc/sing-box/custom-rules /var/log/sing-box-gateway
 # 一个安装器只管理自己创建的网关；已有第三方配置需要显式导入。

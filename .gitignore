@@ -4,3 +4,7 @@ __pycache__/
 *.tar.gz
 *.qcow2
 .env
+
+# 官方固定版本归档随源码分发，确保一键安装能直接获得两种架构。
+!third_party/sing-box/v*/sing-box-*-linux-amd64.tar.gz
+!third_party/sing-box/v*/sing-box-*-linux-arm64.tar.gz

@@ -14,6 +14,34 @@ jobs:
       - run: bash -n scripts/install.sh scripts/uninstall.sh scripts/stop-sing-box-tproxy scripts/update-sing-box-rules-jsdelivr scripts/pve-create-template.sh scripts/sing-box-gateway-info
       - run: sh -n scripts/quick-install.sh
       - run: node --check singbox-rule-ui/static/app.js
+      - run: python scripts/bundled_assets.py
+      - run: python scripts/test_bundled_assets.py
       - run: python scripts/check_config_idempotency.py
       - run: python scripts/test_auto_proxy_learning.py
       - run: python scripts/test_auto_proxy_watch.py
+  native-binary:
+    name: native-binary (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    env:
+      LD_LIBRARY_PATH: /usr/local/lib/sing-box
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python scripts/bundled_assets.py --arch '${{ matrix.arch }}' --destination "$RUNNER_TEMP/sing-box"
+      - run: |
+          sudo install -m 0755 "$RUNNER_TEMP/sing-box/sing-box" /usr/local/bin/sing-box
+          sudo mkdir -p /usr/local/lib/sing-box
+          sudo install -m 0644 "$RUNNER_TEMP/sing-box/libcronet.so" /usr/local/lib/sing-box/libcronet.so
+          sing-box version
+          python scripts/test_auto_proxy_watch.py
