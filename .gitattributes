@@ -1,0 +1,2 @@
+# GitHub 源码包只包含安装代码；原始归档仍保留在 Git 中，安装时按架构单独获取。
+third_party/sing-box export-ignore

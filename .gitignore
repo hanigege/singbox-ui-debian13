@@ -5,6 +5,6 @@ __pycache__/
 *.qcow2
 .env
 
-# 官方固定版本归档随源码分发，确保一键安装能直接获得两种架构。
+# 官方固定版本归档保留在 Git 中；源码包通过 .gitattributes 排除大归档。
 !third_party/sing-box/v*/sing-box-*-linux-amd64.tar.gz
 !third_party/sing-box/v*/sing-box-*-linux-arm64.tar.gz

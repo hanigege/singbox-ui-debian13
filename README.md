@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/s
 curl -fsSL --connect-timeout 15 --max-time 60 https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | GITHUB_DOWNLOAD_PREFIX=https://gh-proxy.com/ bash
 ```
 
-仓库压缩包内置 amd64 / arm64 两份官方原始归档，合计约 58 MiB，包含主程序、`libcronet.so` 和许可证。安装器自动选择当前架构并校验固定 SHA256；缺失或校验失败会停止安装。下载代理用于整个仓库包，已有 HTTP/SOCKS 代理也可以通过 curl 标准环境变量配置。
+Git 仓库保留 amd64 / arm64 两份官方原始归档，源码压缩包不携带大归档。一键安装先下载轻量源码包，自动检测系统架构，再从本仓库同一固定提交只获取对应归档：amd64 约 30 MiB，arm64 约 28 MiB，均包含主程序、`libcronet.so` 和许可证。安装器校验 SHA256 和 ELF 架构后使用；下载失败或校验失败会停止安装。完整 Git 克隆已有的本地归档可直接使用。下载代理同时用于源码包和选中的本仓库归档，已有 HTTP/SOCKS 代理也可以通过 curl 标准环境变量配置。
 
 最小系统若未安装 curl，先执行：
 
@@ -42,7 +42,7 @@ cat /etc/sing-box/rule-ui/token
 
 ## 版本和安装行为
 
-- 内置官方 sing-box **1.14.4 stable** 的 amd64 / arm64 原始发布包，路径、官方来源和 SHA256 固定在 `versions.json`。安装时直接使用本地归档；版本升级需要同步两份归档并通过校验和原生架构 CI，安装器不追随 latest。
+- 内置官方 sing-box **1.14.4 stable** 的 amd64 / arm64 原始发布包，路径、官方来源和 SHA256 固定在 `versions.json`。安装器使用已存在的有效归档，或从匹配源码提交的本仓库地址只下载当前架构；版本升级需要同步两份归档并通过校验和原生架构 CI，安装器不追随 latest。
 - 使用官方 Linux 二进制和 Debian glibc。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
 - 重复安装保留 `nodes/groups/base/token`、自定义规则、timer 计划和 `/etc/default/singbox-gateway`。
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
@@ -134,6 +134,7 @@ sing-box-gateway-uninstall
 ```bash
 python3 scripts/bundled_assets.py  # 检查两种架构的官方归档、运行库和 SHA256
 python3 scripts/test_bundled_assets.py
+python3 scripts/test_download_binary.py
 python3 scripts/check_config_idempotency.py
 python3 scripts/health_check.py  # 需要已安装的 Debian 13
 python3 scripts/acceptance_test.py  # 在独立测试机执行，会保存/导入配置并重启服务

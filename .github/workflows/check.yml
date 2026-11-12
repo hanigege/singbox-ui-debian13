@@ -16,6 +16,7 @@ jobs:
       - run: node --check singbox-rule-ui/static/app.js
       - run: python scripts/bundled_assets.py
       - run: python scripts/test_bundled_assets.py
+      - run: python scripts/test_download_binary.py
       - run: python scripts/check_config_idempotency.py
       - run: python scripts/test_auto_proxy_learning.py
       - run: python scripts/test_auto_proxy_watch.py
@@ -38,7 +39,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python scripts/bundled_assets.py --arch '${{ matrix.arch }}' --destination "$RUNNER_TEMP/sing-box"
+      - name: Check selective public download
+        if: github.event_name == 'push'
+        run: |
+          bundle_source="$RUNNER_TEMP/selective-source"
+          mkdir -p "$bundle_source"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/source.tar.gz" HEAD
+          tar -xzf "$RUNNER_TEMP/source.tar.gz" -C "$bundle_source"
+          cp "$RUNNER_TEMP/source.tar.gz" "$bundle_source/source.tar.gz"
+          test -z "$(find "$bundle_source" -path '*/third_party/*' -name '*.tar.gz')"
+          python "$bundle_source/scripts/download_binary.py" --arch '${{ matrix.arch }}'
+          test "$(find "$bundle_source/third_party" -name '*.tar.gz' | wc -l)" -eq 1
+      - run: |
+          bundle_source="$GITHUB_WORKSPACE"
+          if [ -d "$RUNNER_TEMP/selective-source" ]; then bundle_source="$RUNNER_TEMP/selective-source"; fi
+          python "$bundle_source/scripts/bundled_assets.py" --arch '${{ matrix.arch }}' --destination "$RUNNER_TEMP/sing-box"
       - run: |
           sudo install -m 0755 "$RUNNER_TEMP/sing-box/sing-box" /usr/local/bin/sing-box
           sudo mkdir -p /usr/local/lib/sing-box

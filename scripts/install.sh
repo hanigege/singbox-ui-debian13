@@ -58,8 +58,10 @@ rollback() {
 }
 trap rollback EXIT
 
-# 按当前架构校验并提取仓库内的官方原始归档，缺失或损坏时直接拒装。
+# 按当前架构准备本仓库归档；下载或校验失败时在改动正式程序前停止。
 arch=$(dpkg --print-architecture)
+python3 "$PROJECT_DIR/scripts/download_binary.py" --arch "$arch" \
+  --source-archive "${SINGBOX_UI_SOURCE_ARCHIVE:-$PROJECT_DIR/source.tar.gz}" --prefix "${GITHUB_DOWNLOAD_PREFIX:-}"
 python3 "$PROJECT_DIR/scripts/bundled_assets.py" --arch "$arch" --destination "$gateway_tmp/binary"
 "$gateway_tmp/binary/sing-box" version
 mkdir -p /usr/local/bin /usr/local/sbin /usr/local/lib/sing-box /opt/singbox-rule-ui /etc/sing-box/manager /etc/sing-box/custom-rules /var/log/sing-box-gateway
