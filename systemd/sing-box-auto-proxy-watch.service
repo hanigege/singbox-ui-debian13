@@ -1,0 +1,21 @@
+[Unit]
+Description=Monitor direct HTTPS connections and learn proxy-reachable domains
+Wants=network-online.target sing-box.service singbox-rule-ui.service
+After=network-online.target sing-box.service singbox-rule-ui.service
+ConditionPathExists=/etc/sing-box/config.json
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/singbox-gateway
+ExecStart=/usr/local/sbin/sing-box-auto-proxy-watch
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=40
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

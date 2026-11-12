@@ -15,3 +15,5 @@ jobs:
       - run: sh -n scripts/quick-install.sh
       - run: node --check singbox-rule-ui/static/app.js
       - run: python scripts/check_config_idempotency.py
+      - run: python scripts/test_auto_proxy_learning.py
+      - run: python scripts/test_auto_proxy_watch.py

@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 def main() -> None:
     subprocess.run(["/usr/local/bin/sing-box", "check", "-c", "/etc/sing-box/config.json"], check=True)
-    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui"], check=True)
+    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui", "sing-box-auto-proxy-watch"], check=True)
     token = Path("/etc/sing-box/rule-ui/token").read_text().strip()
     last_error: OSError | None = None
     for attempt in range(20):

@@ -23,7 +23,7 @@ def config_hash() -> str:
 
 
 def assert_services_active() -> None:
-    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui"], check=True)
+    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui", "sing-box-auto-proxy-watch"], check=True)
 
 
 def main() -> None:
@@ -87,7 +87,7 @@ def main() -> None:
     assert result["ok"] and result["applyScheduled"], result.get("error")
     time.sleep(4)
     subprocess.run(["/usr/local/bin/sing-box", "check", "-c", "/etc/sing-box/config.json"], check=True)
-    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui"], check=True)
+    subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui", "sing-box-auto-proxy-watch"], check=True)
     maintenance = api("/api/maintenance")["maintenance"]
     schedule = maintenance["ruleUpdate"]["schedule"]
     schedule_result = api("/api/rules/schedule", {"frequency": "daily", "hour": 4, "minute": 20, "randomizedDelayMinutes": 0})

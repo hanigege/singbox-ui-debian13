@@ -52,13 +52,6 @@ def active_proxy_tag(app):
     return selected if selected in app.enabled_node_tags(app.load_nodes()) else None
 
 
-def is_manually_handled(app, domain, lists):
-    for name in ("whitelist", "blacklist", "greylist", "ddns"):
-        if any(app.auto_domain_matches_entry(domain, entry) for entry in lists.get(name, [])):
-            return True
-    return False
-
-
 def discard_candidate(state, domain):
     candidates = dict(state["candidates"])
     candidates.pop(domain, None)
@@ -98,7 +91,7 @@ def run_tick(dry_run=False):
         probed = []
         if tag:
             for domain in ready[:MAX_PROBES_PER_RUN]:
-                if is_manually_handled(app, domain, lists):
+                if app.is_manually_handled(domain, lists):
                     next_state = discard_candidate(next_state, domain)
                     continue
                 result = app.test_node_delay(tag, url=f"https://{domain}/", timeout_ms=PROBE_TIMEOUT_MS)

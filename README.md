@@ -75,12 +75,18 @@ IPv6 下一跳应使用当前网关实际可达的 ULA；`sing-box-gateway-info`
 
 网关操作系统自身应使用返回真实 IP 的 DNS，例如 `223.5.5.5`；不要继承另一台网关的 FakeIP DNS，否则同一个 `28.x` 地址可能在两台机器上对应不同域名，导致 APT/HTTPS 失败。安装器检测到常见 FakeIP 地址会明确停止。PVE 模板默认设置真实上游 DNS，可通过 `DNS_SERVER` 修改。
 
+## HTTPS 自动学习
+
+国内分类默认直连并使用本地 DNS。自动学习监控从实际直连的 TCP/443 连接中发现可见域名；连续两次 direct HTTPS 探测失败、当前 Proxy 探测成功后，才加入现有的自动学习规则集。学习规则优先于国内直连规则，白名单、DDNS、黑名单、灰名单和测速直连设置保持优先。
+
+监控与原错误日志学习器共用互斥锁，学习开关和已学习列表仍在 Rule UI 管理。每个域名探测后冷却 15 分钟，等待中的域名队列最多 128 个。已有规则通过 sing-box 校验后热更新，不重启主服务；首次遇到故障的连接仍可能失败，后续连接自动使用代理。域名被 ECH 隐藏或仅有 IP 的流量无法通过 SNI 学习。
+
 ## 日常维护
 
 ```bash
 sing-box-gateway-info
 sing-box check -c /etc/sing-box/config.json
-systemctl status sing-box sing-box-tproxy singbox-rule-ui
+systemctl status sing-box sing-box-tproxy singbox-rule-ui sing-box-auto-proxy-watch
 journalctl -u singbox-rule-ui -u sing-box -e
 tail -n 100 /var/log/sing-box-gateway/sing-box.log
 systemctl list-timers '*sing-box*'

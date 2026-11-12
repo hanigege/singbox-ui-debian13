@@ -12,6 +12,7 @@ import time
 import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, unquote, urlparse
 from urllib.request import Request, urlopen
@@ -1706,6 +1707,19 @@ def apply_greylist_dns_fakeip(config, groups=None):
             "rewrite_ttl": 60,
             "query_type": query_types,
         },
+    )
+
+
+class DomainEntry(TypedDict):
+    type: str
+    value: str
+
+
+def is_manually_handled(domain: str, lists: dict[str, list[DomainEntry]]) -> bool:
+    return any(
+        auto_domain_matches_entry(domain, entry)
+        for name in ("whitelist", "blacklist", "greylist", "ddns")
+        for entry in lists.get(name, [])
     )
 
 
