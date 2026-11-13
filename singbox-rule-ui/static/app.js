@@ -3392,7 +3392,7 @@ setInterval(refreshMeta, 5000);
 (() => {
   // 四个时段使用 NASA ISS 实拍背景，随本地静态文件提供。
   const scenes = [
-    { start: 6, end: 10, label: "晨光", image: "/scene-dawn.jpg" },
+    { start: 6, end: 10, label: "晨光", image: "/scene-dawn.jpg?v=20261113-blue" },
     { start: 10, end: 16, label: "白昼", image: "/scene-day.jpg" },
     { start: 16, end: 19, label: "暮色", image: "/scene-dusk.jpg" },
     { start: 19, end: 30, label: "星夜", image: "/scene-night.jpg" },
