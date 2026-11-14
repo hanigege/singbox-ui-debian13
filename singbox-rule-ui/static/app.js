@@ -34,11 +34,12 @@ const translations = {
     checkFailed: "Config check failed. Nothing was restarted.",
     saveBlocked: "Config check failed. Rules were not saved and sing-box was not restarted.",
     changesBlocked: "Config check failed. Changes were not saved and sing-box was not restarted.",
+    greylistFakeipBlocked: "Cannot save: Greylist entry {entry} overlaps the current FakeIP range {range}. Remove that entry; FakeIP is handled automatically.",
     restartFailed: "Restart failed",
     noMatches: "No matching entries",
     noEntries: "No entries",
     entries: "entries",
-    matchHelp: "Match examples",
+    matchHelp: "Matching types",
     remove: "Remove",
     service: "Service",
     memory: "Memory",
@@ -304,25 +305,21 @@ const translations = {
     },
     // 批量编辑框提示。按当前表允许的类型动态拼接，见 renderListHint()
     textareaHint: {
-      format: "One entry per line, format:",
-      types: "Supported types:",
-      fallback:
-        "A line without a type prefix uses the type selected above, so pasting {example} is added as {applied}.",
-      caseNote: "Type prefixes are case-insensitive; the Chinese labels shown in the dropdown also work.",
-      regexNote:
-        "Regex values keep their original case ([^a-zA-Z0-9._-] is stored as typed). Every other type is lowercased, and a trailing dot is dropped.",
-      ipv6Note:
-        "IPv6 must use an explicit ip_cidr: prefix, otherwise the part before the first colon looks like a prefix.",
-      cidrNote: "ip_cidr must be a real network address: use 192.168.1.0/24, not 192.168.1.5/24.",
-      urlNote: "Paste bare domains only. A full URL such as https://example.com/path is rejected.",
-      fallbackShort: "or paste bare domains to use the type selected above",
+      format: "One entry per line, for example",
+      fallback: "Omit the prefix to use the type selected above.",
+      domainNote: "Enter a domain name, not a full URL.",
+      cidrNote: "For IP/CIDR, enter a network address; prefer an explicit ip_cidr: prefix for IPv6.",
+      typeNote: "Type prefixes accept English or Chinese names, regardless of case.",
+      regexNote: "Regex keeps its original case; other values are lowercased and trailing dots are removed.",
+      normalNote: "Values are lowercased and trailing dots are removed.",
+      fallbackShort: "or enter a value using the type selected above",
     },
     typeHelp: {
-      domain: { use: "match one exact domain", example: "login.example.com" },
-      domain_suffix: { use: "match this domain and all subdomains", example: "example.com" },
-      domain_keyword: { use: "match domains containing this word", example: "google" },
-      domain_regex: { use: "match domains with a pattern, such as api1 or api23", example: "^api[0-9]+\\.example\\.com$" },
-      ip_cidr: { use: "match a real destination IP range; for Greylist, the upstream router must also route that IPv4/IPv6 CIDR to sing-box", example: "203.0.113.0/24" },
+      domain: { use: "This exact domain only", example: "login.example.com" },
+      domain_suffix: { use: "This domain and its subdomains", example: "example.com" },
+      domain_keyword: { use: "Domains containing this word", example: "google" },
+      domain_regex: { use: "Domains matching this pattern", example: "^api[0-9]+\\.example\\.com$" },
+      ip_cidr: { use: "Destination IP or network", example: "203.0.113.0/24" },
     },
     listTypeHelp: {
       whitelist: "Direct: suffix is usually enough; IP/CIDR is useful for game servers and other traffic that no longer carries a domain.",
@@ -330,7 +327,11 @@ const translations = {
       greylist: "Proxy: suffix is safest. IP/CIDR can capture literal IP traffic into TProxy, but RouterOS/upstream routing must send the same IPv4 CIDR to sing-box-v4 or IPv6 CIDR to sing-box-v6.",
       ddns: "DDNS only needs exact host or suffix. Keyword and regex are hidden to avoid accidental broad matches.",
     },
-    greylistRouteNotice: "Proxy: suffix is safest. IP/CIDR requires two sides: this UI adds the CIDR to sing-box TProxy capture, and RouterOS/upstream routing must also send that exact IPv4/IPv6 CIDR to the sing-box gateway or the policy table that uses it. Protected LAN and node server ranges are rejected.",
+    greylistRouteNotice: [
+      "Greylist forces proxy traffic. Prefer a domain suffix to cover a domain and its subdomains.",
+      "Adding an IP/CIDR here includes it in TProxy capture. If clients use a main router (RouterOS, iKuai, OPNsense, etc.), route the same IPv4/IPv6 destination to this gateway there. Clients using this gateway directly need no extra route.",
+      "FakeIP is handled automatically. FakeIP, LAN and proxy-node ranges cannot be saved in Greylist.",
+    ],
     lists: {
       whitelist: { title: "Whitelist", note: "Direct routing" },
       blacklist: { title: "Blacklist", note: "Blocked routing" },
@@ -383,11 +384,12 @@ const translations = {
     checkFailed: "配置检测失败，没有执行重启",
     saveBlocked: "配置检测失败，规则未保存，也未重启 sing-box",
     changesBlocked: "配置检测失败，修改未保存，也未重启 sing-box",
+    greylistFakeipBlocked: "无法保存：灰名单条目 {entry} 与当前 FakeIP 网段 {range} 重叠。请删除该条目；FakeIP 已由系统自动处理。",
     restartFailed: "重启失败",
     noMatches: "没有匹配条目",
     noEntries: "没有条目",
     entries: "条",
-    matchHelp: "匹配示例",
+    matchHelp: "匹配方式",
     remove: "删除",
     service: "服务",
     memory: "内存",
@@ -653,23 +655,21 @@ const translations = {
     },
     // 批量编辑框提示。按当前表允许的类型动态拼接，见 renderListHint()
     textareaHint: {
-      format: "每行一个条目，格式：",
-      types: "支持的类型：",
-      fallback: "不写类型前缀则自动使用上方下拉框选中的类型，例如粘贴 {example} 会添加为 {applied}。",
-      caseNote: "类型前缀不区分大小写，也可以直接用下拉框里的中文名称（如 域名后缀:）。",
-      regexNote:
-        "正则的大小写会原样保留（[^a-zA-Z0-9._-] 存进去还是这样）；其余类型统一转小写，并去掉结尾的点。",
-      ipv6Note: "IPv6 必须显式写 ip_cidr: 前缀，否则第一个冒号前的内容会被当成类型前缀。",
-      cidrNote: "ip_cidr 必须是真实网段：写 192.168.1.0/24，不能写 192.168.1.5/24。",
-      urlNote: "只能粘贴纯域名，带协议的完整网址（如 https://example.com/path）会被拒绝。",
-      fallbackShort: "也可以直接粘贴纯域名，会使用上方选中的类型",
+      format: "每行一条，例如",
+      fallback: "省略类型前缀时，按上方选中的类型添加。",
+      domainNote: "域名只填域名，不要粘贴完整网址。",
+      cidrNote: "IP/CIDR 要填网段地址；IPv6 建议加 ip_cidr: 前缀。",
+      typeNote: "类型前缀支持英文或中文名称，大小写不敏感。",
+      regexNote: "正则保留原样；其他类型自动转小写并去掉结尾的点。",
+      normalNote: "条目自动转小写并去掉结尾的点。",
+      fallbackShort: "也可直接输入值，使用上方选中的类型",
     },
     typeHelp: {
-      domain: { use: "只匹配这个完整域名", example: "home.example.com" },
-      domain_suffix: { use: "匹配该域名及其所有子域名", example: "example.com" },
-      domain_keyword: { use: "域名里包含这个关键词就匹配", example: "google" },
-      domain_regex: { use: "按一条表达式匹配有规律的域名，如 api1、api23", example: "^api[0-9]+\\.example\\.com$" },
-      ip_cidr: { use: "匹配真实目标 IP 网段；灰名单使用 IP/CIDR 时，上游路由器也必须把同一段 IPv4/IPv6 送到 sing-box", example: "203.0.113.0/24" },
+      domain: { use: "仅匹配这个域名", example: "home.example.com" },
+      domain_suffix: { use: "包含该域名及其子域名", example: "example.com" },
+      domain_keyword: { use: "域名包含该词即匹配", example: "google" },
+      domain_regex: { use: "按表达式匹配域名", example: "^api[0-9]+\\.example\\.com$" },
+      ip_cidr: { use: "匹配目标 IP 或网段", example: "203.0.113.0/24" },
     },
     listTypeHelp: {
       whitelist: "白名单用于强制直连；游戏服务器这类进入连接阶段只剩 IP 的流量，可以用 IP/CIDR。",
@@ -677,7 +677,11 @@ const translations = {
       greylist: "灰名单用于强制代理；后缀最稳。IP/CIDR 可捕获字面量 IP 流量进 TProxy，但 RouterOS/上游路由也必须把同一段 IPv4 指到 sing-box-v4、IPv6 指到 sing-box-v6。",
       ddns: "DDNS 只保留完整域名和域名后缀；关键词/正则容易误伤，已隐藏。",
     },
-    greylistRouteNotice: "灰名单用于强制代理；后缀最稳。IP/CIDR 需要两边同时配置：这里会把该网段加入 sing-box TProxy 捕获，RouterOS/上游路由也必须把同一段 IPv4/IPv6 指向 sing-box 网关，或指向使用该网关的策略路由表。内网和节点服务器网段会被后端拒绝。",
+    greylistRouteNotice: [
+      "灰名单用于强制代理。优先使用域名后缀，可覆盖该域名及其子域名。",
+      "添加 IP/CIDR 会让本机通过 TProxy 捕获该目标。如果客户端通过主路由（RouterOS、爱快、OPNsense 等）上网，还需在主路由上把同一 IPv4/IPv6 目标指向本机；直接以本机为网关则无需另配路由。",
+      "FakeIP 由系统自动处理；FakeIP、内网和代理节点网段均不能保存到灰名单。",
+    ],
     lists: {
       whitelist: { title: "白名单", note: "强制直连" },
       blacklist: { title: "黑名单", note: "强制阻断" },
@@ -2162,11 +2166,7 @@ function renderTypeOptions() {
   renderListHint();
 }
 
-// renderListHint - 按当前表允许的类型生成 textarea 的 placeholder 和下方提示。
-// 之前这段是 index.html 里的硬编码中文，有三个问题：
-//   1. ddns 表只支持 domain_suffix/domain，却照样列出 5 种类型，照着填后端直接拒；
-//   2. 英文界面下也显示中文；
-//   3. 没有说明"正则保留大小写、其余转小写"和 IPv6 需显式前缀，用户容易踩坑。
+// 按当前名单允许的类型显示示例和输入说明。
 function renderListHint() {
   const hint = $("listTextareaHint");
   const ta = $("listTextarea");
@@ -2174,34 +2174,22 @@ function renderListHint() {
   const types = allowedEntryTypes();
   const dict = translations[lang];
   const h = dict.textareaHint || {};
-  const labels = dict.types || {};
   const ph = dict.placeholders || {};
   const defaultType = ($("typeInput") && $("typeInput").value) || types[0];
+  const example = `${defaultType}: ${ph[defaultType] || "example.com"}`;
+  ta.placeholder = `${example}\n${h.fallbackShort}`;
 
-  // placeholder：每种允许的类型给一行示例，用英文前缀（解析器和后端的规范写法）
-  const lines = types.map((type) => `${type}: ${ph[type] || "example.com"}`);
-  lines.push(h.fallbackShort || (lang === "zh" ? "也可以直接粘贴纯域名" : "or paste bare domains"));
-  ta.placeholder = lines.join("\n");
+  const intro = document.createElement("p");
+  const sample = document.createElement("code");
+  sample.textContent = example;
+  intro.append(h.format, " ", sample, lang === "zh" ? "。" : ". ", h.fallback);
 
-  // 提示正文：只列当前表允许的类型
-  const typeList = types.map((type) => `<code>${type}</code>（${labels[type] || type}）`).join("、");
-  const example = `<code>${ph[defaultType] || "google.com"}</code>`;
-  const applied = `<code>${defaultType}: ${ph[defaultType] || "google.com"}</code>`;
-  const fallback = String(h.fallback || "")
-    .replace("{example}", example)
-    .replace("{applied}", applied);
+  const essentials = document.createElement("p");
+  essentials.textContent = [h.domainNote, types.includes("ip_cidr") ? h.cidrNote : ""].filter(Boolean).join(" ");
 
-  const parts = [
-    `${h.format || ""} <code>type: value</code>。`,
-    `${h.types || ""}${typeList}。`,
-    fallback,
-    h.caseNote,
-  ];
-  // 只有该表允许对应类型时才提示相关注意事项，避免 ddns 显示用不上的说明
-  if (types.includes("domain_regex")) parts.push(h.regexNote);
-  if (types.includes("ip_cidr")) parts.push(h.ipv6Note, h.cidrNote);
-  parts.push(h.urlNote);
-  hint.innerHTML = parts.filter(Boolean).join(" ");
+  const extra = document.createElement("p");
+  extra.textContent = `${h.typeNote} ${types.includes("domain_regex") ? h.regexNote : h.normalNote}`;
+  hint.replaceChildren(intro, essentials, extra);
 }
 
 function updateValueHint() {
@@ -2214,19 +2202,27 @@ function renderMatchHelp() {
   box.className = "match-help";
   const title = document.createElement("strong");
   title.textContent = t("matchHelp");
-  const listNote = document.createElement("p");
+  const listNote = document.createElement("div");
   listNote.className = "route-notice";
-  listNote.textContent = active === "greylist" ? translations[lang].greylistRouteNotice : translations[lang].listTypeHelp[active];
+  const noteLines = active === "greylist" ? translations[lang].greylistRouteNotice : [translations[lang].listTypeHelp[active]];
+  for (const line of noteLines) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = line;
+    listNote.appendChild(paragraph);
+  }
   const examples = document.createElement("div");
   examples.className = "match-examples";
   for (const type of allowedEntryTypes()) {
-    const item = document.createElement("span");
+    const item = document.createElement("div");
+    item.className = "match-example";
     const label = document.createElement("b");
     label.textContent = translations[lang].types[type];
     const help = translations[lang].typeHelp[type];
     const detail = document.createElement("small");
-    detail.textContent = `${help.use}; ${lang === "zh" ? "例如" : "example"}: ${help.example}`;
-    item.append(label, detail);
+    detail.textContent = help.use;
+    const example = document.createElement("code");
+    example.textContent = `${type}: ${help.example}`;
+    item.append(label, detail, example);
     examples.appendChild(item);
   }
   box.append(title, listNote);
@@ -3119,7 +3115,16 @@ async function save(silent = false) {
       if (!silent) window.alert(t("savedAlert"));
     }
   } catch (error) {
-    setStatus(error.message || t("changesBlocked"), "bad");
+    const fakeipOverlap = /^Greylist IP\/CIDR (\S+) overlaps FakeIP range (\S+)/.exec(error.message || "");
+    if (fakeipOverlap) {
+      const message = t("greylistFakeipBlocked")
+        .replace("{entry}", fakeipOverlap[1])
+        .replace("{range}", fakeipOverlap[2]);
+      setStatus(message, "bad");
+      window.alert(message);
+    } else {
+      setStatus(error.message || t("changesBlocked"), "bad");
+    }
   } finally {
     setBusy(false);
     render();

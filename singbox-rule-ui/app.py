@@ -395,11 +395,20 @@ def normalize_list_entries(name, entries):
 
 
 def validate_greylist_ip_cidrs(entries, nodes=None, groups=None):
+    fakeip = (groups if groups is not None else load_groups()).get("fakeip", {})
+    fakeip_networks = (
+        ipaddress.ip_network(normalize_cidr(fakeip.get("inet4_range"), "28.0.0.0/8")),
+        ipaddress.ip_network(normalize_cidr(fakeip.get("inet6_range"), "2001:2::/64")),
+    )
     protected = protected_tproxy_networks(nodes=nodes, groups=groups)
     for item in entries:
         if item.get("type") != "ip_cidr":
             continue
         network = ipaddress.ip_network(item["value"], strict=False)
+        # FakeIP 已单独进入 TProxy；灰名单覆盖它会在切换地址池后留下旧网段捕获规则。
+        for fakeip_network in fakeip_networks:
+            if network.version == fakeip_network.version and network.overlaps(fakeip_network):
+                raise ValueError(f"Greylist IP/CIDR {network} overlaps FakeIP range {fakeip_network}; remove it from Greylist")
         for protected_network in protected:
             if network.version != protected_network.version:
                 continue
