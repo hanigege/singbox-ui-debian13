@@ -1410,7 +1410,7 @@ function renderAutoProxyLearningDetails(learning = {}) {
 
   const listLabel = document.createElement("h4");
   listLabel.textContent = t("autoProxyLearnedDomains");
-  body.appendChild(listLabel);
+  if (learnedDomains.length) body.appendChild(listLabel);
   if (!learnedDomains.length) {
     body.appendChild(renderMaintenanceItem(t("autoProxyLearnedDomains"), t("autoProxyNoDomains")));
   }
