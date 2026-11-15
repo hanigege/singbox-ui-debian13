@@ -67,7 +67,7 @@ cat /etc/sing-box/rule-ui/token
 
 客户端 DNS 指向此机。FakeIP 默认 `28.0.0.0/8` 和 `2001:2::/64`，上游路由器需要把这两个网段路由到本机 IPv4/IPv6 地址；显式灰名单 IP/CIDR 与 Telegram IP 捕获同样需要流量经过本机。真实地址直连流量继续走现有上游网关。仅修改 DNS、没有匹配路由时，FakeIP 无法到达透明代理。
 
-首次安装会预置通用白名单和灰名单，复装保留已有名单。灰名单中的 Google、Cloudflare 公共 DNS IP 只有在主路由也把相同目标路由到本机时才会被 TProxy 捕获；Telegram IP 由维护页独立管理，无需重复加入灰名单。
+首次安装会预置通用白名单和灰名单，复装保留已有名单。白名单不泛匹配 Apple 域名；灰名单中的 Google、Cloudflare 公共 DNS 仅预置 IPv4 地址，只有主路由也把相同目标路由到本机时才会被 TProxy 捕获。真实 IPv6 目标是否可经代理访问取决于节点的远端能力，按需单独配置。Telegram IP 由维护页独立管理，无需重复加入灰名单。
 
 IPv6 下一跳应使用当前网关实际可达的 ULA；`sing-box-gateway-info` 会显示检测到的 DNS 监听地址和当前 FakeIP 网段。FakeIP 网段可在 UI 修改，路由器中的对应路由也必须同步更新。
 
