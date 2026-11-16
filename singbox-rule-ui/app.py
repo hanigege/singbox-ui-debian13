@@ -2055,6 +2055,10 @@ def sing_box_version():
     return match.group(1) if match else first_line[0].strip()
 
 
+def system_uptime_seconds() -> int:
+    return int(float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0]))
+
+
 def check_config(config_path=CONFIG_PATH):
     return run_command(["/usr/local/bin/sing-box", "check", "-c", str(config_path)], timeout=20)
 
@@ -4186,6 +4190,7 @@ def load_state():
             "configPath": str(CONFIG_PATH),
             "service": service_status(),
             "memory": sing_box_memory(),
+            "uptimeSeconds": system_uptime_seconds(),
             # 只展示当前运行二进制版本，便于现场判断配置兼容性；不代表会自动升级 sing-box。
             "singBoxVersion": sing_box_version(),
             "dnsChoices": LOCAL_DNS_CHOICES,

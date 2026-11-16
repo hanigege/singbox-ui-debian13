@@ -43,6 +43,7 @@ const translations = {
     remove: "Remove",
     service: "Service",
     memory: "Memory",
+    uptime: "Uptime",
     updated: "System time",
     singBoxVersion: "sing-box",
     nodes: "Nodes",
@@ -393,6 +394,7 @@ const translations = {
     remove: "删除",
     service: "服务",
     memory: "内存",
+    uptime: "开机时长",
     updated: "系统时间",
     singBoxVersion: "sing-box",
     nodes: "节点",
@@ -717,6 +719,8 @@ let editingNodeTag = null;
 let editingNodeSnapshot = "";
 let nodeEditChanged = false;
 let metaUpdatedAt = null;
+let uptimeBaselineSeconds = null;
+let uptimeBaselineAt = null;
 let metaRefreshInFlight = false;
 let delayRefreshInFlight = false;
 let delayRefreshPending = false;
@@ -886,6 +890,8 @@ function logout() {
   dnsDelays = {};
   dnsDelayHost = "";
   metaUpdatedAt = null;
+  uptimeBaselineSeconds = null;
+  uptimeBaselineAt = null;
   setDirty(false);
   $("tokenInput").value = "";
   showLogin();
@@ -897,6 +903,8 @@ async function load() {
   try {
     state = await api("/api/state");
     metaUpdatedAt = new Date();
+    uptimeBaselineSeconds = state.meta?.uptimeSeconds;
+    uptimeBaselineAt = Date.now();
     await loadProxyInfo();
     setDirty(false);
     showApp();
@@ -919,6 +927,14 @@ async function refreshMeta() {
   metaRefreshInFlight = true;
   try {
     const latest = await api("/api/state");
+    const latestUptime = latest.meta?.uptimeSeconds;
+    const previousUptime = state.meta?.uptimeSeconds;
+    if (Number.isFinite(latestUptime) && (!Number.isFinite(uptimeBaselineSeconds) ||
+        (Number.isFinite(previousUptime) && latestUptime + 2 < previousUptime))) {
+      // 仅在机器重启后重置计时基准；正常刷新不校准读秒。
+      uptimeBaselineSeconds = latestUptime;
+      uptimeBaselineAt = Date.now();
+    }
     state.meta = latest.meta || state.meta;
     metaUpdatedAt = new Date();
     renderMeta();
@@ -1093,6 +1109,13 @@ function renderMeta() {
   versionPill.textContent = `${t("singBoxVersion")}: ${state.meta?.singBoxVersion || "unknown"}`;
   // 配置目录对用户无操作价值（路径固定为 /etc/sing-box），移除该 pill 收敛顶栏信息量
   $("meta").append(service, memoryPill, versionPill);
+  if (Number.isFinite(uptimeBaselineSeconds)) {
+    const uptimePill = document.createElement("span");
+    uptimePill.id = "uptime";
+    uptimePill.className = "meta-pill time-pill";
+    $("meta").append(uptimePill);
+    renderUptime();
+  }
   if (metaUpdatedAt) {
     const updated = document.createElement("span");
     updated.className = "meta-pill meta-updated time-pill";
@@ -1103,6 +1126,17 @@ function renderMeta() {
     })}`;
     $("meta").append(updated);
   }
+}
+
+function renderUptime() {
+  const node = $("uptime");
+  if (!node || !Number.isFinite(uptimeBaselineSeconds)) return;
+  const seconds = Math.max(0, uptimeBaselineSeconds + Math.floor((Date.now() - uptimeBaselineAt) / 1000));
+  const days = Math.floor(seconds / 86400);
+  const hours = String(Math.floor(seconds % 86400 / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0");
+  const remainingSeconds = String(seconds % 60).padStart(2, "0");
+  node.textContent = `${t("uptime")}: ${days}${lang === "zh" ? "天" : "d"} ${hours}:${minutes}:${remainingSeconds}`;
 }
 
 function render() {
@@ -3392,6 +3426,7 @@ setStatus(t("ready"));
 updateButtons();
 load();
 setInterval(refreshMeta, 5000);
+setInterval(renderUptime, 1000);
 
 // 背景场景和时钟按浏览器本地时间更新，不依赖服务端时区。
 (() => {
