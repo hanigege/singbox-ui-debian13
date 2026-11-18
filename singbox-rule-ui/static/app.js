@@ -60,6 +60,10 @@ const translations = {
     transportBbrBadge: "System BBR",
     transportBrutalBadge: "Brutal",
     allowInsecure: "Allow insecure TLS",
+    hy2PinPlaceholder: "HY2 public key SHA-256 (Base64, optional)",
+    hy2PinNote: "Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.",
+    hy2PinInvalid: "HY2 public key SHA-256 must be a 44-character Base64 value.",
+    hy2PinRequiresVerify: "Disable insecure TLS before adding a HY2 public key pin.",
     defaultProxy: "Default proxy",
     activeProxy: "Active proxy",
     autoSelected: "Auto selected",
@@ -413,6 +417,10 @@ const translations = {
     transportBbrBadge: "系统 BBR",
     transportBrutalBadge: "Brutal",
     allowInsecure: "允许不安全 TLS",
+    hy2PinPlaceholder: "HY2 证书公钥 SHA-256（Base64，可选）",
+    hy2PinNote: "填写可信服务端证书的公钥 SHA-256 后，需关闭「允许不安全 TLS」；指纹错误会导致该节点无法连接。",
+    hy2PinInvalid: "HY2 公钥 SHA-256 必须是 44 字符的 Base64 值。",
+    hy2PinRequiresVerify: "填写 HY2 公钥指纹前，请关闭「允许不安全 TLS」。",
     defaultProxy: "默认代理",
     activeProxy: "当前生效",
     autoSelected: "Auto 选中",
@@ -2635,6 +2643,7 @@ function nodeFormChanged() {
 }
 
 function syncNodeTransportControls() {
+  const isHy2 = $("nodeType").value === "hysteria2";
   const isVless = $("nodeType").value === "vless";
   const isSs = $("nodeType").value === "shadowsocks";
   const isSocks = $("nodeType").value === "socks";
@@ -2652,6 +2661,9 @@ function syncNodeTransportControls() {
     const el = $(id);
     if (el) el.disabled = isSocks;
   });
+  $("nodeHy2Pin").disabled = !isHy2;
+  $("nodeHy2Pin").classList.toggle("hidden", !isHy2);
+  $("nodeHy2PinNote").classList.toggle("hidden", !isHy2);
   // AEAD-2022 时钟提示：只在 SS 且加密选了 2022-blake3-* 时显示。
   // 普通 SS 加密(chacha20/aes-gcm)没有防重放时间窗，提示会变噪音。
   const note = $("nodeClockNote");
@@ -2695,6 +2707,9 @@ function selectNode(tag) {
   $("nodePluginOpts").value = outbound.plugin_opts || "";
   $("nodeSni").value = outbound.tls?.server_name || "";
   $("nodeObfs").value = outbound.obfs?.password || "";
+  $("nodeHy2Pin").value = Array.isArray(outbound.tls?.certificate_public_key_sha256)
+    ? outbound.tls.certificate_public_key_sha256.join(", ")
+    : outbound.tls?.certificate_public_key_sha256 || "";
   $("nodePublicKey").value = outbound.tls?.reality?.public_key || "";
   $("nodeShortId").value = outbound.tls?.reality?.short_id || "";
   $("nodeUp").value = outbound.up_mbps || outbound.multiplex?.brutal?.up_mbps || "";
@@ -2889,6 +2904,14 @@ function buildNodeFromForm() {
   if (type === "hysteria2") {
     delete outbound.uuid;
     outbound.password = secret;
+    const pins = $("nodeHy2Pin").value.split(",").map((pin) => pin.trim()).filter(Boolean);
+    if (pins.length) {
+      if ($("nodeInsecure").checked) throw new Error(t("hy2PinRequiresVerify"));
+      if (pins.some((pin) => !/^[A-Za-z0-9+/]{43}=$/.test(pin))) throw new Error(t("hy2PinInvalid"));
+      outbound.tls.certificate_public_key_sha256 = [...new Set(pins)];
+    } else {
+      delete outbound.tls.certificate_public_key_sha256;
+    }
     if (upMbps !== null) outbound.up_mbps = upMbps;
     else delete outbound.up_mbps;
     if (downMbps !== null) outbound.down_mbps = downMbps;

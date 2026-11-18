@@ -233,6 +233,8 @@
             <p id="nodeSocksNote" class="setting-note hidden" data-i18n="nodeSocksNote">SOCKS5 local relay: point to a local socks5 entry (sslocal/ss-local/Dante) on 127.0.0.1, e.g. server=127.0.0.1 port=10010. No password/encryption needed. Typical use: shadowsocks + SIP003 plugin in sing-box intermittently stalls (0-13MB/s, downloads cut off); running the official sslocal client locally and routing sing-box through it restores full speed.</p>
             <input id="nodeSni" type="text" autocomplete="off" placeholder="tls server_name" />
             <input id="nodeObfs" type="text" autocomplete="off" placeholder="obfs password" />
+            <input id="nodeHy2Pin" class="hidden" type="text" autocomplete="off" aria-label="HY2 certificate public key SHA-256" data-i18n-placeholder="hy2PinPlaceholder" placeholder="HY2 public key SHA-256 (Base64, optional)" />
+            <p id="nodeHy2PinNote" class="setting-note hidden" data-i18n="hy2PinNote">Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.</p>
             <input id="nodePublicKey" type="text" autocomplete="off" placeholder="reality public_key" />
             <input id="nodeShortId" type="text" autocomplete="off" placeholder="short_id" />
             <input id="nodeUp" type="number" min="1" placeholder="up Mbps" />
