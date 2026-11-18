@@ -16,16 +16,6 @@ RestartSec=3
 UMask=0077
 ProtectHome=true
 PrivateTmp=true
-NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_NET_ADMIN
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-RestrictSUIDSGID=yes
-RestrictRealtime=yes
-LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target

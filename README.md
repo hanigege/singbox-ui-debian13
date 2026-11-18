@@ -46,9 +46,9 @@ cat /etc/sing-box/rule-ui/token
 - 使用官方 Linux 二进制和 Debian glibc。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
 - 重复安装保留 `nodes/groups/base/token`、自定义规则、timer 计划和 `/etc/default/singbox-gateway`。
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
-- 首次安装通过服务和 UI 验收后，自动保存可冷启动的 `known-good` 配置与规则快照；手动写坏正式配置后，服务启动时可恢复这份快照。录入真实节点并完成实际网络验收后，以 root 执行 `refresh-sing-box-runtime-config --capture-known-good` 更新恢复基线。
 - 所有 UI 保存与导入都先生成临时配置，执行 `sing-box check`，通过后原子落盘；运行态应用失败回滚。
 - nftables 只管理 `inet singbox_tproxy`，整表先校验再以单事务替换。不会 flush 其它防火墙规则。
+- TProxy 重载时保留现有规则，使用 nftables 事务替换；本地规则文件更新经暂存检查后原子替换，由 sing-box 自动热加载，不重启进程。
 - DNS 劫持明确 DNAT 到实际 LAN/ULA 监听地址，不依赖 GUA/ULA 的地址顺序；公网 GUA 不提供递归解析。
 - 不修改 `/etc/resolv.conf`，不自动停止其它 DNS。若 LAN 53 端口冲突，安装失败并显示占用进程。
 - 默认不广播 IPv6 RA、不打开系统转发。需要让机器承担三层网关时，在 `/etc/default/singbox-gateway` 显式启用 forwarding，再重启 TProxy。
@@ -72,7 +72,7 @@ cat /etc/sing-box/rule-ui/token
 
 IPv6 下一跳应使用当前网关实际可达的 ULA；`sing-box-gateway-info` 会显示检测到的 DNS 监听地址和当前 FakeIP 网段。FakeIP 网段可在 UI 修改，路由器中的对应路由也必须同步更新。
 
-如果 RouterOS 在转发链使用 `Drop invalid`，修改 FakeIP 网段时还须核对其前面的 FakeIP `connection-state=invalid` 放行规则是否匹配新网段；漏改会使透明代理的 TCP 握手反复重传。
+切换 FakeIP 地址池前，先在 RouterOS 配置与新网段一致的路由，并核对 `Drop invalid forward` 之前针对该网段的 LAN 转发规则。不同地址池使用独立缓存文件；回退地址池时会重新使用原缓存。切换后分别验证 IPv4、IPv6 透明连接。
 
 建议为部署机器设置 DHCP 静态租约或 cloud-init 固定地址。每两分钟检测 IP/IPv6 前缀变化，仅发生变化或服务异常时重新应用。
 

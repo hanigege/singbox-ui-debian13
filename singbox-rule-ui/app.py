@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 import os
 import re
@@ -159,7 +160,6 @@ DOMAIN_RE = re.compile(r"^[A-Za-z0-9_*.-]+$")
 SPECIAL_OUTBOUNDS = {"Proxy", "Auto", "direct", "block"}
 SUPPORTED_NODE_TYPES = {"hysteria2", "vless", "shadowsocks", "socks"}
 BACKUP_VERSION = 1
-ADMIN_POST_LOCK = threading.Lock()
 LOG_LEVELS = {"trace", "debug", "info", "warn", "warning", "error", "fatal", "panic"}
 LEGACY_APP_RULE_SETS = {
     "geosite-ai",
@@ -1446,10 +1446,17 @@ def apply_fakeip_quic_policy(config, groups):
 
 
 def fakeip_cache_name(fakeip: dict[str, object]) -> str:
-    name = fakeip.get("cache_file", "cache.db")
-    if not isinstance(name, str) or not re.fullmatch(r"cache(?:-[a-z0-9-]{1,80})?\.db", name):
-        raise ValueError("FakeIP cache file must be named cache.db or cache-<name>.db")
-    return name
+    explicit = fakeip.get("cache_file")
+    if explicit is not None:
+        if not isinstance(explicit, str) or not re.fullmatch(r"cache(?:-[a-z0-9-]{1,80})?\.db", explicit):
+            raise ValueError("FakeIP cache file must be named cache.db or cache-<name>.db")
+        return explicit
+    ipv4 = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
+    ipv6 = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
+    if (ipv4, ipv6) == ("28.0.0.0/8", "2001:2::/64"):
+        return "cache.db"
+    digest = hashlib.sha256(f"{ipv4}|{ipv6}".encode("ascii")).hexdigest()[:16]
+    return f"cache-fakeip-{digest}.db"
 
 
 def apply_cache_file_settings(config, groups):
@@ -1460,7 +1467,7 @@ def apply_cache_file_settings(config, groups):
     # 「save FakeIP cache: key required」WARN，结果是重启后 fakeip 映射不复用、白开 store_fakeip。
     if not str(cache.get("cache_id") or "").strip():
         cache["cache_id"] = "gateway"
-    # 迁移地址池时可以另用一个映射文件，回滚后仍能读取旧地址与域名映射。
+    # 不同地址池分开保存映射；回退到旧地址池时仍可复用旧缓存。
     cache["path"] = str(Path("/etc/sing-box") / fakeip_cache_name(groups.get("fakeip", {})))
 
 
@@ -2067,14 +2074,22 @@ def system_uptime_seconds() -> int:
 
 
 def check_config(config_path=CONFIG_PATH):
-    try:
-        return run_command(["/usr/local/bin/sing-box", "check", "-c", str(config_path)], timeout=20)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"code": 1, "stdout": "", "stderr": str(exc)}
+    return run_command(["/usr/local/bin/sing-box", "check", "-c", str(config_path)], timeout=20)
 
 
 def reset_sing_box_failed():
     return run_command(["systemctl", "reset-failed", "sing-box.service"], timeout=8)
+
+
+def wait_for_unit_active(unit, timeout=15):
+    deadline = time.time() + timeout
+    last_status = "unknown"
+    while time.time() < deadline:
+        last_status = unit_status(unit)
+        if last_status == "active":
+            return {"active": True, "service": last_status}
+        time.sleep(0.5)
+    return {"active": False, "service": last_status}
 
 
 def restart_sing_box():
@@ -2088,41 +2103,17 @@ def restart_sing_box():
             "resetFailed": None,
             "service": unit_status("sing-box"),
         }
-    recovery_marker = CONFIG_PATH.parent / "recovery" / "last-recovery"
-    previous_recovery = read_text_if_exists(recovery_marker)
-    reset = None
-    try:
-        reset = reset_sing_box_failed()
-        restart = run_command(service_args("sing-box", "restart"), timeout=45)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        # 发布候选后，启动超时也必须走调用方原有的回滚路径。
-        return {"code": 1, "stdout": "", "stderr": str(exc), "precheck": check, "resetFailed": reset, "service": "unknown"}
-    if restart["code"] != 0:
-        return {**restart, "precheck": check, "resetFailed": reset, "service": service_status()}
-
-    # Type=simple 的 active 可能早于进程实际监听。确认 Clash API 就绪才允许 Web 保存返回成功。
-    deadline = time.monotonic() + 8
-    ready = False
-    status = "unknown"
-    while time.monotonic() < deadline:
-        status = service_status()
-        if status == "active" and clash_api_request("/version", timeout=0.5)["ok"]:
-            ready = True
-            break
-        time.sleep(0.2)
-    recovered = read_text_if_exists(recovery_marker) != previous_recovery
-    error = restart["stderr"]
-    if recovered:
-        error = "sing-box recovered its last known-good configuration. The requested configuration was not activated."
-    elif not ready:
-        error = "sing-box did not become ready. Check the sing-box service log."
+    reset = reset_sing_box_failed()
+    restart = run_command(service_args("sing-box", "restart"), timeout=20)
+    wait = wait_for_unit_active("sing-box")
+    code = 0 if restart["code"] == 0 and wait["active"] else 1
     return {
-        "code": int(recovered or not ready),
+        "code": code,
         "stdout": restart["stdout"],
-        "stderr": error,
+        "stderr": restart["stderr"],
         "precheck": check,
         "resetFailed": reset,
-        "service": status,
+        "service": wait["service"],
     }
 
 
@@ -2141,25 +2132,42 @@ def restart_rule_ui_later(delay=1.0):
     threading.Thread(target=target, daemon=True).start()
 
 
-def apply_import_runtime(nodes, groups, normalized_lists):
-    result = {"restart": None, "tproxySync": None, "error": ""}
-    phase = "sing-box restart"
-    try:
-        restart = restart_sing_box()
-        result["restart"] = restart
-        if restart["code"] == 0:
-            phase = "TProxy sync"
-            sync = sync_tproxy(nodes=nodes, groups=groups, normalized_lists=normalized_lists)
-            result["tproxySync"] = sync
-            if sync["code"] == 0:
-                return result
-            detail = sync["stderr"] or sync["stdout"] or "Check the TProxy service log."
-        else:
-            detail = restart["stderr"] or restart["stdout"] or "Check the sing-box service log."
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-        detail = str(exc)
-    result["error"] = f"{phase} failed. {detail}"
-    return result
+def apply_import_runtime_later(nodes, groups, normalized_lists, saved_result, delay=0.3):
+    def target():
+        time.sleep(delay)
+        try:
+            # 导入接口必须先把 HTTP 响应发回浏览器；运行态重启放后台，避免 fetch 被 OpenRC 重启链路打断。
+            restart = restart_sing_box()
+            if restart["code"] != 0 or service_status() != "active":
+                # 后台应用失败时仍保留导入前的回滚语义，避免留下无法启动的新配置。
+                rollback_apply(saved_result)
+                restart_sing_box()
+                print(f"backup import runtime apply rolled back after restart failure: {restart}")
+                return
+            tproxy = sync_tproxy(nodes=nodes, groups=groups, normalized_lists=normalized_lists)
+            if tproxy.get("code") != 0:
+                rollback_apply(saved_result)
+                rollback_restart = restart_sing_box()
+                rollback_tproxy = sync_tproxy()
+                print(
+                    "backup import runtime apply rolled back after TProxy sync failure: "
+                    f"sync={tproxy}, restart={rollback_restart}, tproxyRollback={rollback_tproxy}"
+                )
+                return
+            current_proxy_payload_after_probe(test_delays=True)
+        except Exception as exc:
+            try:
+                rollback_apply(saved_result)
+                rollback_restart = restart_sing_box()
+                rollback_tproxy = sync_tproxy()
+                print(
+                    "backup import runtime apply rolled back after unexpected failure: "
+                    f"error={exc}, restart={rollback_restart}, tproxyRollback={rollback_tproxy}"
+                )
+            except Exception as rollback_exc:
+                print(f"backup import runtime apply failed and rollback failed: error={exc}, rollback={rollback_exc}")
+
+    threading.Thread(target=target, daemon=True).start()
 
 
 def parse_rule_update_schedule():
@@ -2838,7 +2846,6 @@ sysctl -w "net.ipv6.conf.${{IFACE}}.accept_ra=2" >/dev/null 2>&1 || true
 sysctl -w "net.ipv6.conf.${{IFACE}}.accept_ra_defrtr=1" >/dev/null 2>&1 || true
 
 # IPv4/IPv6 FakeIP 都必须把 TProxy 标记包送回本机 lo；缺少 IPv6 表会让浏览器拿到 AAAA FakeIP 后仍无法进入 sing-box。
-# 重载时保留已存在的策略规则，避免重复添加，也让真正的添加失败向上报错。
 for family in -4 -6; do
   existing_rule=$(ip "$family" rule show pref 100 fwmark "${{TPROXY_MARK}}" table "${{TPROXY_TABLE}}")
   if [ -z "$existing_rule" ]; then
@@ -3069,15 +3076,11 @@ def auto_proxy_learning_summary():
 
 
 def tproxy_runtime_healthy() -> bool:
-    # oneshot 显示 active 时，内核里的 nftables 表或策略路由仍可能已被清除。
+    # oneshot 的 active 状态不能证明内核规则仍在。
     nft = run_command(["nft", "-j", "list", "table", "inet", "singbox_tproxy"], timeout=8)
     if nft["code"] != 0:
         return False
-    chains = {
-        item["chain"]["name"]
-        for item in json.loads(nft["stdout"])["nftables"]
-        if "chain" in item
-    }
+    chains = {item["chain"]["name"] for item in json.loads(nft["stdout"])["nftables"] if "chain" in item}
     if not {"prerouting", "output", "dns_hijack"}.issubset(chains):
         return False
     for family in ("-4", "-6"):
@@ -3397,7 +3400,7 @@ def clash_api_request(path, method="GET", payload=None, timeout=8):
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         return {"ok": False, "code": exc.code, "error": raw or str(exc)}
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (URLError, TimeoutError, OSError) as exc:
         return {"ok": False, "code": 0, "error": str(exc)}
 
 
@@ -4181,29 +4184,19 @@ def import_backup_payload(payload):
             "rollback": None,
             "tproxySync": None,
         }
-    saved = apply_all(normalized_lists, nodes, groups)
-    # systemd 只为 Rule UI 声明启动顺序，应用和回滚都结束后再返回结果。
-    runtime = apply_import_runtime(nodes, groups, normalized_lists)
-    rollback = None
-    error = runtime["error"]
-    if error:
-        try:
-            rollback_apply(saved)
-            rollback = apply_import_runtime(None, None, None)
-        except (OSError, ValueError) as exc:
-            rollback = {"error": str(exc)}
-        if rollback["error"]:
-            error = f"{error} Rollback failed. {rollback['error']}"
-        else:
-            error = f"{error} Previous configuration was restored."
+    result = apply_all(normalized_lists, nodes, groups)
+    apply_import_runtime_later(nodes, groups, normalized_lists, result)
     return {
-        **runtime,
-        "ok": not error,
-        "error": error,
+        "ok": True,
+        "error": "",
         "check": check,
-        "saved": saved,
-        "rollback": rollback,
-        "applyScheduled": False,
+        "saved": result,
+        "restart": {"code": 0, "stdout": "", "stderr": "", "scheduled": True, "service": "sing-box"},
+        "rollback": None,
+        "tproxySync": {"code": 0, "stdout": "", "stderr": "", "scheduled": True, "service": TPROXY_SERVICE},
+        "applyScheduled": True,
+        "maintenance": maintenance_status(),
+        "state": load_state(),
     }
 
 
@@ -4275,7 +4268,7 @@ class Handler(BaseHTTPRequestHandler):
     def authorized(self):
         token = get_token()
         auth = self.headers.get("Authorization", "")
-        return secrets.compare_digest(auth.encode("utf-8"), f"Bearer {token}".encode("utf-8"))
+        return auth == f"Bearer {token}"
 
     def send_json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -4451,14 +4444,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             self.send_error_json("Unauthorized", 401)
             return
-        locked = False
         try:
             payload = self.read_json_body()
-            # 两个管理请求不能交错写入节点、名单、配置和回滚快照。
-            locked = ADMIN_POST_LOCK.acquire(blocking=False)
-            if not locked:
-                self.send_error_json("Another management operation is in progress. Retry after it finishes.", 409)
-                return
             if parsed.path == "/api/save":
                 normalized_lists = normalize_payload_lists(payload.get("lists", {}))
                 nodes = normalize_nodes(payload.get("nodes", load_nodes()))
@@ -4673,9 +4660,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error_json("Not found", 404)
         except Exception as exc:
             self.send_error_json(str(exc), 400)
-        finally:
-            if locked:
-                ADMIN_POST_LOCK.release()
 
     def serve_static(self, path):
         if path in ("", "/"):

@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -83,8 +84,8 @@ def main() -> None:
     result = api("/api/save", state)
     assert result["check"]["code"] == 0 and result["restart"]["code"] == 0, result.get("error")
     result = api("/api/backup/import", backup)
-    assert result["ok"] and not result["applyScheduled"], result.get("error")
-    assert result["restart"]["code"] == 0 and result["tproxySync"]["code"] == 0
+    assert result["ok"] and result["applyScheduled"], result.get("error")
+    time.sleep(4)
     subprocess.run(["/usr/local/bin/sing-box", "check", "-c", "/etc/sing-box/config.json"], check=True)
     subprocess.run(["systemctl", "is-active", "sing-box", "sing-box-tproxy", "singbox-rule-ui", "sing-box-auto-proxy-watch"], check=True)
     maintenance = api("/api/maintenance")["maintenance"]

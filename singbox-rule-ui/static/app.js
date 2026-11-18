@@ -2144,20 +2144,46 @@ async function importBackupFromFile(event) {
     state = result.state;
     maintenance = result.maintenance || maintenance;
     proxyRequestVersion++;
+    // 导入成功后运行态由后端后台重启应用；先清掉旧缓存，再延迟刷新，避免当前 fetch 被 OpenRC 重启链路打断。
     runtimeProxy = { now: null, available: false };
     delays = {};
+    applyProxyPayload(result);
     setDirty(false);
     render();
+    if (result.tproxySync && result.tproxySync.code !== 0) {
+      finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
+      setStatus(`${t("backupImported")}；${t("tproxySyncFailed")}`, "bad");
+      return;
+    }
     finishActionButton("importBackupBtn", "actionDone", "done", "importBackup");
     setStatus(t("backupImported"), "ok");
     window.alert(t("backupImportedAlert"));
-    refreshDelaysInBackground();
+    if (result.applyScheduled) {
+      refreshMaintenance().catch(() => {});
+      pollDelaysAfterImport();
+    } else if (!result.delays) loadProxyInfo().then(() => render()).catch(() => {});
   } catch (error) {
     finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
     setStatus(error.message || t("backupImportFailed"), "bad");
   } finally {
     setBusy(false);
   }
+}
+
+async function pollDelaysAfterImport(maxAttempts = 5, interval = 3500) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (i > 0) await sleep(interval);
+    try {
+      await loadProxyInfo();
+      render();
+      const hasDelays = Object.values(delays).some((d) => d?.ok && typeof d.delay === "number");
+      if (hasDelays) return;
+    } catch (e) {}
+  }
+  try {
+    await loadProxyDelays();
+    render();
+  } catch (e) {}
 }
 
 function allowedEntryTypes() {
