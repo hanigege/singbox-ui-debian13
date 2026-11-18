@@ -8,7 +8,7 @@ TELEGRAM_CIDR_FILE="${RULE_UPDATE_TELEGRAM_CIDR_FILE:-$MANAGER_DIR/telegram-cidr
 SING_BOX="${RULE_UPDATE_SING_BOX:-${SING_BOX:-/usr/local/bin/sing-box}}"
 SERVICE="${RULE_UPDATE_SERVICE_NAME:-sing-box}"
 TPROXY_SERVICE="${RULE_UPDATE_TPROXY_SERVICE:-sing-box-tproxy}"
-RESTART_SERVICE="${RULE_UPDATE_RESTART:-1}"
+RESTART_SERVICE="${RULE_UPDATE_RESTART:-0}"
 FORCE_UPDATE="${RULE_UPDATE_FORCE:-0}"
 LOCK_WAIT="${RULE_UPDATE_LOCK_WAIT:-0}"
 ONLY_TELEGRAM_CIDR="${RULE_UPDATE_ONLY_TELEGRAM_CIDR:-0}"
@@ -30,10 +30,33 @@ else
 fi
 
 TMP_DIR="$(mktemp -d)"
+RESTORE_FILES=()
+pending_file=""
+rollback_required=0
+telegram_rollback_required=0
 cleanup() {
+  local status=$? rollback_failed=0
+  if [ -n "$pending_file" ]; then
+    rm -f "$pending_file" || true
+    pending_file=""
+  fi
+  if [ "$telegram_rollback_required" = "1" ] && ! restore_telegram_cidrs; then
+    echo "ERROR: Telegram CIDR rollback failed; backup directory retained at $TMP_DIR" >&2
+    rollback_failed=1
+  fi
+  if [ "$rollback_required" = "1" ] && ! restore_backups; then
+    echo "ERROR: rule rollback failed; backups retained in $BACKUP_DIR" >&2
+    rollback_failed=1
+  fi
+  if [ "$rollback_failed" = "1" ]; then
+    exit 1
+  fi
   rm -rf "$TMP_DIR"
+  return "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 SCRIPT_START_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
 
@@ -167,6 +190,7 @@ curl_rule_file() {
 
 update_telegram_cidr_file() {
   local source output log host ip curl_flags
+  local candidate="$TMP_DIR/telegram-cidr.new"
   if [ "${#TELEGRAM_CIDR_SOURCES[@]}" -eq 0 ]; then
     echo "optional telegram cidr list update disabled: no sources configured"
     return 0
@@ -182,14 +206,14 @@ update_telegram_cidr_file() {
       curl_flags+=(--resolve "${host}:443:${ip}")
     fi
     if curl "${curl_flags[@]}" "$source" -o "$output" 2>"$log"; then
-      python3 - "$output" "$TELEGRAM_CIDR_FILE" "$source" <<'PY'
+      if python3 - "$output" "$TELEGRAM_CIDR_FILE" "$candidate" "$source" <<'PY'
 import ipaddress
 import json
 import sys
 import time
 from pathlib import Path
 
-source_path, target_path, source = sys.argv[1:]
+source_path, target_path, staged_path, source = sys.argv[1:]
 items = []
 for raw in Path(source_path).read_text(encoding="utf-8").splitlines():
     line = raw.split("#", 1)[0].strip().strip("'\"")
@@ -213,20 +237,42 @@ collapsed = sorted(collapsed, key=lambda item: (item.version, int(item.network_a
 if not any(item.version == 4 for item in collapsed) or not any(item.version == 6 for item in collapsed):
     raise SystemExit("telegram cidr list must include IPv4 and IPv6 ranges")
 target = Path(target_path)
-target.parent.mkdir(parents=True, exist_ok=True)
+cidrs = [str(item) for item in collapsed]
+try:
+    existing = json.loads(target.read_text(encoding="utf-8"))
+except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+    existing = None
+if isinstance(existing, dict) and existing.get("cidrs") == cidrs:
+    raise SystemExit(10)
+
 updated_at_unix = int(time.time())
-target.write_text(json.dumps({
+Path(staged_path).write_text(json.dumps({
     "source": source,
     "updatedAt": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(updated_at_unix)),
     "updatedAtUnix": updated_at_unix,
-    "cidrs": [str(item) for item in collapsed],
+    "cidrs": cidrs,
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
-      echo "updated optional telegram cidr list from $source"
-      if systemctl is-active "$TPROXY_SERVICE" >/dev/null 2>&1; then
-        systemctl restart "$TPROXY_SERVICE" >/dev/null 2>&1 || echo "WARN: TProxy restart failed after Telegram CIDR update; UI sync can retry" >&2
+      then
+        if [ -f "$TELEGRAM_CIDR_FILE" ]; then
+          cp -a "$TELEGRAM_CIDR_FILE" "$TMP_DIR/telegram-cidr.previous"
+        fi
+        telegram_rollback_required=1
+        replace_file "$candidate" "$TELEGRAM_CIDR_FILE" 0600
+        if systemctl is-active "$TPROXY_SERVICE" >/dev/null 2>&1 &&
+           ! systemctl reload-or-restart "$TPROXY_SERVICE"; then
+          echo "ERROR: TProxy reload failed after Telegram CIDR update; previous cache will be restored" >&2
+          return 1
+        fi
+        telegram_rollback_required=0
+        echo "updated optional telegram cidr list from $source"
+        return 0
+      elif [ "$?" -eq 10 ]; then
+        echo "optional telegram cidr list unchanged"
+        return 0
       fi
-      return 0
+      echo "WARN: rejected optional telegram cidr data from $source" >&2
+      continue
     fi
     echo "optional telegram cidr source unavailable: $source" >&2
   done
@@ -237,13 +283,6 @@ PY
   echo "optional telegram cidr list unavailable; built-in UI fallback will be used" >&2
   return 0
 }
-
-if [ "$ONLY_TELEGRAM_CIDR" = "1" ]; then
-  # UI 的 Telegram IP 网段按钮只影响 TProxy 放行范围；不要顺带下载 geosite/geoip，
-  # 否则一个小文件更新会被镜像探测和 sing-box 重启链路拖慢。
-  update_telegram_cidr_file
-  exit 0
-fi
 
 required_files_present() {
   local name
@@ -293,9 +332,16 @@ fetch_one() {
         url="$(source_url "$mirror" "$source" "$subdir" "$name")"
         if curl_rule_file "$url" "$tmp" "$TMP_DIR/curl-${subdir}-${name}.log"; then
           if [ -s "$tmp" ] && [ "$(wc -c < "$tmp")" -gt 16 ]; then
-            echo "downloaded ${subdir}/${name}.srs via ${source} ${mirror}"
-            UPDATED_FILES+=("$subdir/$name.srs:$tmp")
-            return 0
+            if cmp -s "$tmp" "$current"; then
+              echo "keeping existing file (unchanged): ${subdir}/${name}.srs"
+              return 0
+            fi
+            if "$SING_BOX" rule-set decompile --output /dev/null "$tmp"; then
+              echo "downloaded ${subdir}/${name}.srs via ${source} ${mirror}"
+              UPDATED_FILES+=("$subdir/$name.srs:$tmp")
+              return 0
+            fi
+            echo "WARN: rejected invalid rule ${subdir}/${name}.srs from ${mirror}" >&2
           fi
         fi
       done
@@ -319,23 +365,90 @@ fetch_one() {
   return 1
 }
 
+replace_file() {
+  local src="$1" dst="$2" mode="$3"
+  if [ -d "$dst" ]; then
+    echo "ERROR: rule destination is a directory: $dst" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "$dst")" || return 1
+  pending_file="$(mktemp "$(dirname "$dst")/.rule-update.XXXXXX")" || return 1
+  install -m "$mode" "$src" "$pending_file" || return 1
+  mv -f "$pending_file" "$dst" || return 1
+  pending_file=""
+}
+
+restore_telegram_cidrs() {
+  local backup="$TMP_DIR/telegram-cidr.previous"
+  if [ -f "$backup" ]; then
+    replace_file "$backup" "$TELEGRAM_CIDR_FILE" 0600
+  else
+    rm -f "$TELEGRAM_CIDR_FILE"
+  fi
+}
+
 restore_backups() {
-  local rel dst bak
-  for rel in "${RESTORE_FILES[@]:-}"; do
+  local rel dst bak failed=0
+  for rel in ${RESTORE_FILES[@]+"${RESTORE_FILES[@]}"}; do
     dst="$BASE_DIR/$rel"
     bak="$BACKUP_DIR/$rel"
     if [ -f "$bak" ]; then
-      install -m 0644 "$bak" "$dst"
+      replace_file "$bak" "$dst" 0644 || failed=1
     else
-      rm -f "$dst"
+      rm -f "$dst" || failed=1
     fi
   done
+  return "$failed"
+}
+
+stage_rule_config() {
+  local staged_dir="$TMP_DIR/staged-rules" staged_config="$TMP_DIR/staged-config.json"
+  local entry rel
+  mkdir -p "$staged_dir" || return 1
+  for rel in geosite geoip; do
+    if [ -d "$BASE_DIR/$rel" ]; then
+      mkdir -p "$staged_dir/$rel" || return 1
+      cp -a "$BASE_DIR/$rel/." "$staged_dir/$rel/" || return 1
+    fi
+  done
+  for entry in "${UPDATED_FILES[@]}"; do
+    rel="${entry%%:*}"
+    mkdir -p "$staged_dir/$(dirname "$rel")" || return 1
+    rm -f "$staged_dir/$rel" || return 1
+    cp "${entry#*:}" "$staged_dir/$rel" || return 1
+  done
+  for rel in "${LEGACY_UNUSED_GEOSITE[@]}"; do
+    rm -f "$staged_dir/geosite/$rel.srs" || return 1
+  done
+  for rel in "${LEGACY_UNUSED_GEOIP[@]}"; do
+    rm -f "$staged_dir/geoip/$rel.srs" || return 1
+  done
+  # 只重写规则更新器管理的本地路径，其它配置沿用正式文件。
+  python3 - "$CONFIG" "$BASE_DIR" "$staged_dir" "$staged_config" <<'PY' || return 1
+import json
+import sys
+from pathlib import Path
+
+source, base, staged, target = map(Path, sys.argv[1:])
+config = json.loads(source.read_text(encoding="utf-8"))
+for rule_set in config.get("route", {}).get("rule_set", []):
+    path = rule_set.get("path")
+    if rule_set.get("type") != "local" or not isinstance(path, str):
+        continue
+    try:
+        relative = Path(path).absolute().relative_to(base.absolute())
+    except ValueError:
+        continue
+    if relative.parts and relative.parts[0] in ("geosite", "geoip"):
+        rule_set["path"] = str(staged / relative)
+target.write_text(json.dumps(config), encoding="utf-8")
+PY
+  "$SING_BOX" check -c "$staged_config"
 }
 
 restart_sing_box_safely() {
   # systemd 重启后核对 active 状态；仍然坚持先 check，再重启，失败回滚旧规则。
-  systemctl restart "$SERVICE"
-  systemctl is-active "$SERVICE" >/dev/null 2>&1
+  systemctl restart "$SERVICE" && systemctl is-active "$SERVICE" >/dev/null 2>&1
 }
 
 backup_existing_rule() {
@@ -407,18 +520,24 @@ finish_checked_update() {
   local restart_reason="${1:-sing-box rule sets updated}"
   local restart="${2:-$RESTART_SERVICE}"
   local result="${3:-success}"
-  prune_legacy_unused_rules
 
   if ! "$SING_BOX" check -c "$CONFIG"; then
     echo "ERROR: sing-box config check failed after rule update; rolling back rule files" >&2
-    restore_backups
-    "$SING_BOX" check -c "$CONFIG" || true
+    if [ "$rollback_required" = "1" ]; then
+      restore_backups
+      rollback_required=0
+      "$SING_BOX" check -c "$CONFIG" || true
+    fi
     record_rule_update_last "failed"
     exit 1
   fi
 
   if [ "$restart" = "0" ]; then
-    echo "$restart_reason and config checked. Service restart skipped."
+    rollback_required=0
+    if [ "$result" = "success" ]; then
+      update_telegram_cidr_file
+    fi
+    echo "$restart_reason and config checked, service restart skipped (local rule sets reload automatically)."
     record_rule_update_last "$result"
     exit 0
   fi
@@ -426,6 +545,7 @@ finish_checked_update() {
   if ! restart_sing_box_safely; then
     echo "ERROR: sing-box restart failed after rule update; rolling back rule files" >&2
     restore_backups
+    rollback_required=0
     "$SING_BOX" check -c "$CONFIG" || true
     if ! restart_sing_box_safely; then
       record_rule_update_last "failed"
@@ -435,11 +555,19 @@ finish_checked_update() {
     exit 1
   fi
 
-  systemctl is-active "$SERVICE" >/dev/null 2>&1
+  rollback_required=0
+  update_telegram_cidr_file
   echo "$restart_reason and service restarted safely."
   record_rule_update_last "$result"
   exit 0
 }
+
+if [ "$ONLY_TELEGRAM_CIDR" = "1" ]; then
+  # UI 的 Telegram IP 网段按钮只影响 TProxy 放行范围；不要顺带下载 geosite/geoip，
+  # 否则一个小文件更新会被镜像探测和 sing-box 重启链路拖慢。
+  update_telegram_cidr_file
+  exit 0
+fi
 
 fail=0
 if ! select_mirrors; then
@@ -460,31 +588,36 @@ for name in "${GEOIP_REQUIRED[@]}"; do
   fetch_one "geoip" "$name" 1 || fail=1
 done
 
-# 先落盘所有已成功下载的文件，再判失败：单个文件瞬时下载失败时，
-# 已下载的其余文件不能整批丢弃（曾致新装 rules 目录全空、sing-box 起不来）。
-RESTORE_FILES=()
-for entry in "${UPDATED_FILES[@]}"; do
+if [ "${UPDATED_FILES[0]+changed}" != changed ] && [ "$fail" -eq 0 ]; then
+  finish_checked_update "sing-box rule sets unchanged" "0"
+fi
+
+# 初装或恢复缺失文件时允许积累通过二进制校验的新规则。
+# 规则齐全时先用暂存配置检查整套候选，再更新正式文件。
+if [ "$fail" -eq 0 ] && ! stage_rule_config; then
+  echo "ERROR: staged rule-set config check failed; live rule files were kept" >&2
+  record_rule_update_last "failed"
+  exit 1
+fi
+rollback_required=1
+for entry in ${UPDATED_FILES[@]+"${UPDATED_FILES[@]}"}; do
   rel="${entry%%:*}"
   src="${entry#*:}"
   dst="$BASE_DIR/$rel"
-  mkdir -p "$(dirname "$BACKUP_DIR/$rel")" "$(dirname "$dst")"
-  if [ -f "$dst" ]; then
-    cp -a "$dst" "$BACKUP_DIR/$rel"
+  if [ "$fail" -ne 0 ] && [ -s "$dst" ]; then
+    continue
   fi
-  install -m 0644 "$src" "$dst"
-  RESTORE_FILES+=("$rel")
+  backup_existing_rule "$rel"
+  replace_file "$src" "$dst" 0644
   echo "installed $rel"
 done
 
 if [ "$fail" -ne 0 ]; then
-  # 部分规则下载失败：已成功文件已落盘，缺失文件由 cron 重试补齐；
-  # 这里不强行 check/restart（缺文件时 check 必败且回滚会误删已装文件），
-  # 安装流程（install.sh 里 `|| true`）照常继续，verify 阶段会报缺哪些。
-  echo "WARN: some rule files failed to download; installed ${#UPDATED_FILES[@]} file(s), missing files will be retried by cron" >&2
+  rollback_required=0
+  echo "WARN: some required rule files failed to download; kept verified files for the next retry" >&2
   record_rule_update_last "failed"
   exit "$fail"
 fi
 
-update_telegram_cidr_file
-
+prune_legacy_unused_rules
 finish_checked_update "sing-box rule sets updated"

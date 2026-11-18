@@ -107,7 +107,8 @@ def main():
 
     config = load_config()
     config_needs_refresh = bool(lan_ip and not config_matches_runtime(config, lan_ip, ipv6_listener))
-    tproxy_needs_refresh = bool(not script_v6 or not ipv6_prefixes_covered(current_v6, script_v6))
+    tproxy_live_ok = app.tproxy_runtime_healthy()
+    tproxy_needs_refresh = not tproxy_live_ok or not script_v6 or not ipv6_prefixes_covered(current_v6, script_v6)
     config_refresh_ok = True
 
     if config_needs_refresh:
@@ -124,7 +125,11 @@ def main():
 
     if tproxy_needs_refresh or not service_active(TPROXY_SERVICE):
         # TProxy 捕获边界依赖当前网卡和 IPv6 前缀；只在前缀不一致或服务异常时刷新。
-        actions.append({"restartTproxy": restart_service(TPROXY_SERVICE)})
+        reload = run(["systemctl", "reload-or-restart", TPROXY_SERVICE], timeout=60)
+        actions.append({"reloadTproxy": reload})
+        tproxy_live_ok = reload["code"] == 0 and app.tproxy_runtime_healthy()
+        if not tproxy_live_ok:
+            actions.append({"verifyTproxy": {"code": 1, "stderr": "TProxy nftables or policy routing is unavailable after reload."}})
 
     if not service_active(SING_BOX_SERVICE):
         check = run([str(SING_BOX_BIN), "check", "-c", str(CONFIG_PATH)], timeout=30)
@@ -146,10 +151,11 @@ def main():
         "ipv6Listener": ipv6_listener,
         "configNeedsRefresh": config_needs_refresh,
         "tproxyNeedsRefresh": tproxy_needs_refresh,
+        "tproxyRuntimeHealthy": tproxy_live_ok,
         "actions": actions,
     }
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return int(any(action["code"] != 0 for entry in actions for action in entry.values()))
 
 
 if __name__ == "__main__":

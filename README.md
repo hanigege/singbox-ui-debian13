@@ -71,6 +71,8 @@ cat /etc/sing-box/rule-ui/token
 
 IPv6 下一跳应使用当前网关实际可达的 ULA；`sing-box-gateway-info` 会显示检测到的 DNS 监听地址和当前 FakeIP 网段。FakeIP 网段可在 UI 修改，路由器中的对应路由也必须同步更新。
 
+如果 RouterOS 在转发链使用 `Drop invalid`，修改 FakeIP 网段时还须核对其前面的 FakeIP `connection-state=invalid` 放行规则是否匹配新网段；漏改会使透明代理的 TCP 握手反复重传。
+
 建议为部署机器设置 DHCP 静态租约或 cloud-init 固定地址。每两分钟检测 IP/IPv6 前缀变化，仅发生变化或服务异常时重新应用。
 
 网关操作系统自身应使用返回真实 IP 的 DNS，例如 `223.5.5.5`；不要继承另一台网关的 FakeIP DNS，否则同一个 `28.x` 地址可能在两台机器上对应不同域名，导致 APT/HTTPS 失败。安装器检测到常见 FakeIP 地址会明确停止。PVE 模板默认设置真实上游 DNS，可通过 `DNS_SERVER` 修改。

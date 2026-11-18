@@ -6,12 +6,12 @@ const translations = {
     restart: "Restart",
     restartHint: "Use only when you need to reload sing-box without changing rules.",
     restartSingbox: "Restart sing-box",
-    restartTproxy: "Restart TProxy",
-    restartingTproxy: "Restarting TProxy",
+    restartTproxy: "Reload TProxy",
+    restartingTproxy: "Reloading TProxy",
     restartingSingbox: "Restarting sing-box",
     singboxRestarted: "sing-box restarted",
-    tproxyRestarted: "TProxy restarted",
-    tproxyRestartFailed: "TProxy restart failed. sing-box is still running.",
+    tproxyRestarted: "TProxy reloaded",
+    tproxyRestartFailed: "TProxy reload failed.",
     save: "Save",
     saveHint: "Save runs a staged sing-box check first. If it passes, rules are saved and sing-box restarts. If it fails, nothing is changed.",
     add: "Add",
@@ -222,6 +222,8 @@ const translations = {
     updateScript: "Script",
     timerStatus: "Timer",
     tproxyService: "TProxy service",
+    tproxyKernelStatus: "TProxy nftables and policy routes",
+    tproxyKernelMissing: "Missing rules or routes",
     defaultInterface: "Default interface",
     currentIpv6Prefix: "Local IPv6 LAN prefixes",
     currentIpv4Prefix: "Local IPv4 LAN prefix",
@@ -357,12 +359,12 @@ const translations = {
     restart: "重启",
     restartHint: "仅在没有改规则、但需要重新加载 sing-box 时使用。",
     restartSingbox: "重启 sing-box",
-    restartTproxy: "重启 TProxy",
-    restartingTproxy: "正在重启 TProxy",
+    restartTproxy: "重载 TProxy",
+    restartingTproxy: "正在重载 TProxy",
     restartingSingbox: "正在重启 sing-box",
     singboxRestarted: "sing-box 已重启",
-    tproxyRestarted: "TProxy 已重启",
-    tproxyRestartFailed: "TProxy 重启失败，sing-box 仍在运行。",
+    tproxyRestarted: "TProxy 已重载",
+    tproxyRestartFailed: "TProxy 重载失败。",
     save: "保存",
     saveHint: "保存会先用临时规则检测 sing-box 配置；通过才保存并重启，失败不会改正式规则。",
     add: "添加",
@@ -573,6 +575,8 @@ const translations = {
     updateScript: "脚本",
     timerStatus: "定时器",
     tproxyService: "TProxy 服务",
+    tproxyKernelStatus: "TProxy 内核规则与策略路由",
+    tproxyKernelMissing: "规则或路由缺失",
     defaultInterface: "默认网卡",
     currentIpv6Prefix: "本机 IPv6 局域网段",
     currentIpv4Prefix: "本机 IPv4 局域网段",
@@ -1580,6 +1584,7 @@ function renderMaintenance() {
   const overview = renderMaintenanceOverview([
     [t("interfaceMtu"), configHealth.interfaceMtu || t("unknown"), String(configHealth.interfaceMtu) === "1492" || String(configHealth.interfaceMtu) === "1500" ? "good compact" : "soft compact"],
     [t("updateResult"), updateResult, statusTone(updateResult)],
+    [t("tproxyKernelStatus"), tproxy.runtimeHealthy === false ? t("tproxyKernelMissing") : t(tproxy.runtimeHealthy === true ? "healthy" : "unknown"), tproxy.runtimeHealthy === false ? "bad" : tproxy.runtimeHealthy === true ? "good" : ""],
     [t("nextUpdate"), rule.next, rule.next ? "good compact" : ""],
   ]);
   overview.insertBefore(renderHealthSummaryBanner(configHealth), overview.children[1] || null);
@@ -2139,46 +2144,20 @@ async function importBackupFromFile(event) {
     state = result.state;
     maintenance = result.maintenance || maintenance;
     proxyRequestVersion++;
-    // 导入成功后运行态由后端后台重启应用；先清掉旧缓存，再延迟刷新，避免当前 fetch 被 OpenRC 重启链路打断。
     runtimeProxy = { now: null, available: false };
     delays = {};
-    applyProxyPayload(result);
     setDirty(false);
     render();
-    if (result.tproxySync && result.tproxySync.code !== 0) {
-      finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
-      setStatus(`${t("backupImported")}；${t("tproxySyncFailed")}`, "bad");
-      return;
-    }
     finishActionButton("importBackupBtn", "actionDone", "done", "importBackup");
     setStatus(t("backupImported"), "ok");
     window.alert(t("backupImportedAlert"));
-    if (result.applyScheduled) {
-      refreshMaintenance().catch(() => {});
-      pollDelaysAfterImport();
-    } else if (!result.delays) loadProxyInfo().then(() => render()).catch(() => {});
+    refreshDelaysInBackground();
   } catch (error) {
     finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
     setStatus(error.message || t("backupImportFailed"), "bad");
   } finally {
     setBusy(false);
   }
-}
-
-async function pollDelaysAfterImport(maxAttempts = 5, interval = 3500) {
-  for (let i = 0; i < maxAttempts; i++) {
-    if (i > 0) await sleep(interval);
-    try {
-      await loadProxyInfo();
-      render();
-      const hasDelays = Object.values(delays).some((d) => d?.ok && typeof d.delay === "number");
-      if (hasDelays) return;
-    } catch (e) {}
-  }
-  try {
-    await loadProxyDelays();
-    render();
-  } catch (e) {}
 }
 
 function allowedEntryTypes() {
