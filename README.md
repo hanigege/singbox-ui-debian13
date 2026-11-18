@@ -46,6 +46,7 @@ cat /etc/sing-box/rule-ui/token
 - 使用官方 Linux 二进制和 Debian glibc。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
 - 重复安装保留 `nodes/groups/base/token`、自定义规则、timer 计划和 `/etc/default/singbox-gateway`。
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
+- 首次安装通过服务和 UI 验收后，自动保存可冷启动的 `known-good` 配置与规则快照；手动写坏正式配置后，服务启动时可恢复这份快照。
 - 所有 UI 保存与导入都先生成临时配置，执行 `sing-box check`，通过后原子落盘；运行态应用失败回滚。
 - nftables 只管理 `inet singbox_tproxy`，整表先校验再以单事务替换。不会 flush 其它防火墙规则。
 - DNS 劫持明确 DNAT 到实际 LAN/ULA 监听地址，不依赖 GUA/ULA 的地址顺序；公网 GUA 不提供递归解析。

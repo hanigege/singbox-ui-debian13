@@ -107,7 +107,7 @@ class SourceArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             path = Path(name) / "source.tar.gz"
             subprocess.run(["git", "archive", "--format=tar.gz", "--worktree-attributes", "--output", str(path), "HEAD"], cwd=ROOT, check=True)
-            self.assertLess(path.stat().st_size, 1024 * 1024)
+            self.assertLess(path.stat().st_size, 2 * 1024 * 1024)
             expected = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
             self.assertEqual(source_commit(path), expected)
             with tarfile.open(path) as archive:

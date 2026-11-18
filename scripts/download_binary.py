@@ -43,10 +43,11 @@ def ensure_binary(root: Path, arch: Architecture, source_archive: Path, prefix: 
         temporary_asset.parent.mkdir(parents=True)
         result = subprocess.run([
             "curl", "--fail", "--location", "--retry", "3", "--retry-all-errors",
-            "--connect-timeout", "15", "--max-time", "600", "--output", str(temporary_asset), prefix + url,
+            "--connect-timeout", "15", "--max-time", "600", "--speed-limit", "1024", "--speed-time", "30",
+            "--output", str(temporary_asset), prefix + url,
         ])
         if result.returncode != 0:
-            raise RuntimeError(f"本仓库二进制下载失败: arch={arch}, commit={commit}, exit={result.returncode}")
+            raise RuntimeError(f"本仓库二进制下载失败: arch={arch}, commit={commit}, exit={result.returncode}；如果 GitHub 直连停滞，请按 README 的下载代理命令重试")
         verify_asset(staging, manifest["version"], arch, spec)
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary_asset.replace(destination)
