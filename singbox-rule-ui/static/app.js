@@ -60,6 +60,30 @@ const translations = {
     transportBbrBadge: "System BBR",
     transportBrutalBadge: "Brutal",
     allowInsecure: "Allow insecure TLS",
+    nodeBasicTitle: "Basic details",
+    nodeTransportTitle: "Authentication and transport",
+    nodeSecurityTitle: "TLS and certificates",
+    nodeTypeLabel: "Node type",
+    nodeTagLabel: "Node name",
+    nodeServerLabel: "Server address",
+    nodePortLabel: "Port",
+    nodeSecretLabel: "Password / UUID",
+    nodeTransportLabel: "Transport mode",
+    nodeMethodLabel: "Cipher method",
+    nodePluginLabel: "Plugin",
+    nodePluginOptsLabel: "Plugin options",
+    nodeObfsLabel: "Salamander obfuscation password",
+    nodeUpLabel: "Upload bandwidth (Mbps)",
+    nodeDownLabel: "Download bandwidth (Mbps)",
+    nodeSniLabel: "TLS server_name / SNI",
+    nodeRealityKeyLabel: "REALITY public key",
+    nodeShortIdLabel: "REALITY short_id",
+    hy2PinLabel: "certificate_public_key_sha256 · certificate public key pin",
+    hy2PinGuideTitle: "Get the pin from a self-signed certificate",
+    hy2PinGuideNote: "Run on the HY2 server. Replace the certificate path with this node's tls.certificate_path. The private key is not needed.",
+    hy2PinCopy: "Copy command",
+    hy2PinCopied: "Command copied",
+    hy2PinCopyFailed: "Could not copy the command",
     hy2PinPlaceholder: "HY2 public key SHA-256 (Base64, optional)",
     hy2PinNote: "Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.",
     hy2PinInvalid: "HY2 public key SHA-256 must be a 44-character Base64 value.",
@@ -417,6 +441,30 @@ const translations = {
     transportBbrBadge: "系统 BBR",
     transportBrutalBadge: "Brutal",
     allowInsecure: "允许不安全 TLS",
+    nodeBasicTitle: "基本信息",
+    nodeTransportTitle: "认证与传输",
+    nodeSecurityTitle: "TLS 与证书",
+    nodeTypeLabel: "节点类型",
+    nodeTagLabel: "节点名称",
+    nodeServerLabel: "服务器地址",
+    nodePortLabel: "端口",
+    nodeSecretLabel: "密码 / UUID",
+    nodeTransportLabel: "传输模式",
+    nodeMethodLabel: "加密方式",
+    nodePluginLabel: "插件",
+    nodePluginOptsLabel: "插件参数",
+    nodeObfsLabel: "Salamander 混淆密码",
+    nodeUpLabel: "上行带宽 Mbps",
+    nodeDownLabel: "下行带宽 Mbps",
+    nodeSniLabel: "TLS server_name / SNI",
+    nodeRealityKeyLabel: "REALITY 公钥",
+    nodeShortIdLabel: "REALITY short_id",
+    hy2PinLabel: "certificate_public_key_sha256 · 证书公钥指纹",
+    hy2PinGuideTitle: "如何从自签证书计算指纹",
+    hy2PinGuideNote: "在 HY2 服务端执行；先把证书路径改为该节点 tls.certificate_path 的实际值。只读取证书，不需要私钥。",
+    hy2PinCopy: "复制命令",
+    hy2PinCopied: "命令已复制",
+    hy2PinCopyFailed: "复制命令失败",
     hy2PinPlaceholder: "HY2 证书公钥 SHA-256（Base64，可选）",
     hy2PinNote: "填写可信服务端证书的公钥 SHA-256 后，需关闭「允许不安全 TLS」；指纹错误会导致该节点无法连接。",
     hy2PinInvalid: "HY2 公钥 SHA-256 必须是 44 字符的 Base64 值。",
@@ -2643,6 +2691,10 @@ function nodeFormChanged() {
 }
 
 function syncNodeTransportControls() {
+  const type = $("nodeType").value;
+  document.querySelectorAll("#nodeForm [data-node-types]").forEach((field) => {
+    field.classList.toggle("hidden", !field.dataset.nodeTypes.split(" ").includes(type));
+  });
   const isHy2 = $("nodeType").value === "hysteria2";
   const isVless = $("nodeType").value === "vless";
   const isSs = $("nodeType").value === "shadowsocks";
@@ -3311,6 +3363,29 @@ $("nodeTransportMode").addEventListener("change", () => {
 // method 是自由文本输入，AEAD-2022 时钟提示要随用户敲字实时显隐，
 // 故单独挂 input 监听（nodeForm 的委托监听只负责脏状态，不刷控件可用性）。
 $("nodeMethod").addEventListener("input", syncNodeTransportControls);
+$("nodeHy2PinCopy").addEventListener("click", async () => {
+  const command = $("nodeHy2PinCommand").textContent.trim();
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(command);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = command;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      try {
+        textarea.select();
+        if (!document.execCommand("copy")) throw new Error("copy command was rejected");
+      } finally {
+        textarea.remove();
+      }
+    }
+    setStatus(t("hy2PinCopied"), "ok");
+  } catch (error) {
+    setStatus(`${t("hy2PinCopyFailed")}: ${error.message}`, "bad");
+  }
+});
 $("nodeCancel").addEventListener("click", clearNodeForm);
 $("searchInput").addEventListener("input", render);
 $("typeInput").addEventListener("change", updateValueHint);

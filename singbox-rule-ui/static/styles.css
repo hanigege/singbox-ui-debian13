@@ -544,37 +544,72 @@ button[data-i18n="updateRules"] {
   letter-spacing: 0 !important;
 }
 
-/* iOS 拨片开关 */
+/* 开关同时显示颜色、位置和文字状态，避免浅色背景下看不清开关。 */
 .switch-field input[type="checkbox"],
 .policy-option-head input[type="checkbox"],
-.checkline input[type="checkbox"] {
+.checkline input[type="checkbox"],
+.switchline input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
-  width: 51px;
-  height: 31px;
-  background: var(--line-strong);
-  border-radius: 16px;
+  width: 68px;
+  height: 34px;
+  background: #4b5b70;
+  border-radius: 18px;
   position: relative;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, box-shadow 0.2s;
   flex-shrink: 0;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.32);
   padding: 0;
 }
 
 .switch-field input[type="checkbox"]:checked,
 .policy-option-head input[type="checkbox"]:checked,
-.checkline input[type="checkbox"]:checked {
-  background: var(--ok);
+.checkline input[type="checkbox"]:checked,
+.switchline input[type="checkbox"]:checked {
+  background: #087e56;
+  box-shadow: 0 0 0 3px rgba(27, 193, 131, 0.18);
+}
+
+.switch-field input[type="checkbox"]::before,
+.policy-option-head input[type="checkbox"]::before,
+.checkline input[type="checkbox"]::before,
+.switchline input[type="checkbox"]::before {
+  content: "OFF";
+  position: absolute;
+  right: 7px;
+  top: 9px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.switch-field input[type="checkbox"]:checked::before,
+.policy-option-head input[type="checkbox"]:checked::before,
+.checkline input[type="checkbox"]:checked::before,
+.switchline input[type="checkbox"]:checked::before {
+  content: "ON";
+  left: 9px;
+  right: auto;
+}
+
+.switch-field input[type="checkbox"]:focus-visible,
+.policy-option-head input[type="checkbox"]:focus-visible,
+.checkline input[type="checkbox"]:focus-visible,
+.switchline input[type="checkbox"]:focus-visible {
+  outline: 3px solid #b5e9ff;
+  outline-offset: 3px;
 }
 
 .switch-field input[type="checkbox"]::after,
 .policy-option-head input[type="checkbox"]::after,
-.checkline input[type="checkbox"]::after {
+.checkline input[type="checkbox"]::after,
+.switchline input[type="checkbox"]::after {
   content: "";
   position: absolute;
-  width: 27px;
-  height: 27px;
+  width: 28px;
+  height: 28px;
   background: #fff;
   border-radius: 50%;
   top: 2px;
@@ -585,8 +620,9 @@ button[data-i18n="updateRules"] {
 
 .switch-field input[type="checkbox"]:checked::after,
 .policy-option-head input[type="checkbox"]:checked::after,
-.checkline input[type="checkbox"]:checked::after {
-  transform: translateX(20px);
+.checkline input[type="checkbox"]:checked::after,
+.switchline input[type="checkbox"]:checked::after {
+  transform: translateX(34px);
 }
 
 .policy-grid {
@@ -689,14 +725,49 @@ button[data-i18n="updateRules"] {
 
 /* 节点表单 */
 .node-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
   margin-bottom: 16px;
+}
+
+.node-form-section {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.node-form-section legend {
+  padding: 0 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.node-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.node-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.node-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .node-form input,
@@ -705,22 +776,110 @@ button[data-i18n="updateRules"] {
   font-size: 14px;
 }
 
-.node-form .checkline {
+.node-form .node-field input,
+.node-form .node-field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.node-field-wide,
+.node-form-grid > .setting-note,
+.node-form-grid > .checkline {
   grid-column: 1 / -1;
+}
+
+.node-form .checkline {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.node-form .checkline input[type="checkbox"] {
+  width: 68px;
+  min-width: 68px;
+  padding: 0;
+}
+
+.node-pin-block {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(48, 168, 215, 0.45);
+  border-radius: 12px;
+  background: rgba(39, 154, 197, 0.08);
+}
+
+.node-pin-block .node-field > span {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.node-pin-block input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.node-pin-guide {
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.node-pin-guide summary {
+  cursor: pointer;
+  color: var(--text);
   font-size: 13px;
+  font-weight: 700;
+}
+
+.node-pin-guide p {
   color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.node-form button {
-  grid-column: 1 / -1;
+.node-command {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
 
-/* 节点表单里的说明文字（如 AEAD-2022 时钟提示）必须横跨整行：
-   .node-form 是 auto-fit 多列 grid，不设 grid-column 会被压成 ~178px 的窄长条，
-   长句折成十几行没法读。样式对齐 .checkline 的 1 / -1 处理。 */
+.node-command code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.node-form .node-command button {
+  width: auto;
+  flex: none;
+  padding: 9px 12px;
+}
+
+.node-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.node-form-actions button {
+  flex: none;
+}
+
 .node-form .setting-note {
   grid-column: 1 / -1;
   margin: 2px 0 0;
@@ -2809,4 +2968,21 @@ body::before {
   border-color: rgba(205, 226, 255, 0.14);
   background-color: rgba(4, 14, 30, 0.58);
   opacity: 0.82;
+}
+
+@media (max-width: 600px) {
+  .node-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .node-command,
+  .node-form-actions {
+    flex-direction: column;
+  }
+
+  .node-form .node-command button,
+  #nodeSubmit,
+  #nodeCancel {
+    width: 100%;
+  }
 }

@@ -199,49 +199,72 @@
           </section>
 
           <form id="nodeForm" class="node-form">
-            <select id="nodeType" aria-label="Node type">
-              <option value="hysteria2">Hysteria2</option>
-              <option value="vless">VLESS Reality</option>
-              <option value="shadowsocks">Shadowsocks</option>
-              <option value="socks">SOCKS5 本地中转</option>
-            </select>
-            <select id="nodeTransportMode" aria-label="VLESS transport mode">
-              <option value="bbr">System BBR / TCP</option>
-              <option value="brutal">Brutal mux</option>
-            </select>
-            <!-- Brutal mux 说明：选中即显示。padding 固定 false（不加随机字节填充），
-                 减少每包开销降低游戏延迟；brutal 生效时 min_streams/max_connections 为死字段，
-                 由 sing-mux 内部短路，无需暴露给用户。 -->
-            <p id="nodeBrutalNote" class="setting-note hidden" data-i18n="nodeBrutalNote">Brutal mux: padding is fixed to false (no random byte padding) to reduce per-packet overhead and gaming latency. When brutal is enabled, min_streams/max_connections are dead fields (short-circuited by sing-mux) and need no configuration.</p>
-            <input id="nodeTag" type="text" autocomplete="off" placeholder="tag" />
-            <input id="nodeServer" type="text" autocomplete="off" placeholder="server" />
-            <input id="nodePort" type="number" min="1" max="65535" placeholder="443" />
-            <input id="nodeSecret" type="text" autocomplete="off" placeholder="password / uuid" />
-            <input id="nodeMethod" type="text" autocomplete="off" placeholder="method (chacha20-ietf-poly1305)" />
-            <input id="nodePlugin" type="text" autocomplete="off" placeholder="plugin (v2ray-plugin)" />
-            <input id="nodePluginOpts" type="text" autocomplete="off" placeholder="plugin_opts (mode=websocket;tls;host=...;path=/jgaga)" />
-            <!-- AEAD-2022 时钟提示：2022-blake3-* 加密有 30 秒防重放窗口，两端时钟差超限会被
-                 服务端直接拒连，症状是「节点能连但 0 B/s」，极难自查。安装器刻意不代管系统
-                 NTP（详见 install.sh 注释），所以在这里提示用户自行保证时钟同步。
-                 显隐由 app.js syncNodeTransportControls() 按 method 是否 2022-blake3 控制。 -->
-            <p id="nodeClockNote" class="setting-note hidden" data-i18n="nodeClockNote">2022-blake3 encryption requires the gateway and server clocks to be within 30 seconds, otherwise the node connects but transfers 0 B/s. Keep NTP running on this host.</p>
-            <!-- Shadowsocks 节点填写格式提示：SS 类型即显示（区别于 nodeClockNote 只在
-                 2022-blake3 时显示）。重点提示 AEAD-2022 + WS 伪装版的 plugin/plugin_opts
-                 标准填法，避免用户保存时字段留空被删（UI 保存逻辑对空 plugin 直接 delete）。
-                 显隐由 app.js syncNodeTransportControls() 按 nodeType 控制。 -->
-            <p id="nodeSsFormatNote" class="setting-note hidden" data-i18n="nodeSsFormatNote">Shadowsocks fill-in guide: method 2022-blake3-aes-256-gcm requires a 44-char base64 key from `ssservice genkey` (not a plain password). For Caddy/WebSocket disguise: plugin=v2ray-plugin, plugin_opts=mode=websocket;tls;host=YOUR_DOMAIN;path=/YOUR_PATH — both fields are required, leaving them empty removes the disguise and the node breaks.</p>
-            <p id="nodeSocksNote" class="setting-note hidden" data-i18n="nodeSocksNote">SOCKS5 local relay: point to a local socks5 entry (sslocal/ss-local/Dante) on 127.0.0.1, e.g. server=127.0.0.1 port=10010. No password/encryption needed. Typical use: shadowsocks + SIP003 plugin in sing-box intermittently stalls (0-13MB/s, downloads cut off); running the official sslocal client locally and routing sing-box through it restores full speed.</p>
-            <input id="nodeSni" type="text" autocomplete="off" placeholder="tls server_name" />
-            <input id="nodeObfs" type="text" autocomplete="off" placeholder="obfs password" />
-            <input id="nodeHy2Pin" class="hidden" type="text" autocomplete="off" aria-label="HY2 certificate public key SHA-256" data-i18n-placeholder="hy2PinPlaceholder" placeholder="HY2 public key SHA-256 (Base64, optional)" />
-            <p id="nodeHy2PinNote" class="setting-note hidden" data-i18n="hy2PinNote">Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.</p>
-            <input id="nodePublicKey" type="text" autocomplete="off" placeholder="reality public_key" />
-            <input id="nodeShortId" type="text" autocomplete="off" placeholder="short_id" />
-            <input id="nodeUp" type="number" min="1" placeholder="up Mbps" />
-            <input id="nodeDown" type="number" min="1" placeholder="down Mbps" />
-            <label class="checkline"><input id="nodeInsecure" type="checkbox" checked /> <span data-i18n="allowInsecure">Allow insecure TLS</span></label>
-            <button id="nodeSubmit" type="submit" data-i18n="addNode">Add node</button>
-            <button id="nodeCancel" class="secondary-btn hidden" type="button" data-i18n="cancelEdit">Cancel</button>
+            <fieldset class="node-form-section">
+              <legend data-i18n="nodeBasicTitle">基本信息</legend>
+              <div class="node-form-grid">
+                <label class="node-field"><span data-i18n="nodeTypeLabel">节点类型</span>
+                  <select id="nodeType">
+                    <option value="hysteria2">Hysteria2</option>
+                    <option value="vless">VLESS Reality</option>
+                    <option value="shadowsocks">Shadowsocks</option>
+                    <option value="socks">SOCKS5 本地中转</option>
+                  </select>
+                </label>
+                <label class="node-field"><span data-i18n="nodeTagLabel">节点名称</span><input id="nodeTag" type="text" autocomplete="off" placeholder="tag" /></label>
+                <label class="node-field"><span data-i18n="nodeServerLabel">服务器地址</span><input id="nodeServer" type="text" autocomplete="off" placeholder="server" /></label>
+                <label class="node-field"><span data-i18n="nodePortLabel">端口</span><input id="nodePort" type="number" min="1" max="65535" placeholder="443" /></label>
+              </div>
+            </fieldset>
+            <fieldset class="node-form-section">
+              <legend data-i18n="nodeTransportTitle">认证与传输</legend>
+              <div class="node-form-grid">
+                <label class="node-field" data-node-types="hysteria2 vless shadowsocks"><span data-i18n="nodeSecretLabel">密码 / UUID</span><input id="nodeSecret" type="text" autocomplete="off" placeholder="password / uuid" /></label>
+                <label class="node-field" data-node-types="vless"><span data-i18n="nodeTransportLabel">传输模式</span>
+                  <select id="nodeTransportMode">
+                    <option value="bbr">System BBR / TCP</option>
+                    <option value="brutal">Brutal mux</option>
+                  </select>
+                </label>
+                <p id="nodeBrutalNote" class="setting-note hidden" data-i18n="nodeBrutalNote">Brutal mux: padding is fixed to false (no random byte padding) to reduce per-packet overhead and gaming latency. When brutal is enabled, min_streams/max_connections are dead fields (short-circuited by sing-mux) and need no configuration.</p>
+                <label class="node-field" data-node-types="shadowsocks"><span data-i18n="nodeMethodLabel">加密方式</span><input id="nodeMethod" type="text" autocomplete="off" placeholder="method (chacha20-ietf-poly1305)" /></label>
+                <label class="node-field" data-node-types="shadowsocks"><span data-i18n="nodePluginLabel">插件</span><input id="nodePlugin" type="text" autocomplete="off" placeholder="plugin (v2ray-plugin)" /></label>
+                <label class="node-field node-field-wide" data-node-types="shadowsocks"><span data-i18n="nodePluginOptsLabel">插件参数</span><input id="nodePluginOpts" type="text" autocomplete="off" placeholder="plugin_opts (mode=websocket;tls;host=...;path=/jgaga)" /></label>
+                <p id="nodeClockNote" class="setting-note hidden" data-i18n="nodeClockNote">2022-blake3 encryption requires the gateway and server clocks to be within 30 seconds, otherwise the node connects but transfers 0 B/s. Keep NTP running on this host.</p>
+                <p id="nodeSsFormatNote" class="setting-note hidden" data-i18n="nodeSsFormatNote">Shadowsocks fill-in guide: method 2022-blake3-aes-256-gcm requires a 44-char base64 key from ssservice genkey (not a plain password). For Caddy/WebSocket disguise: plugin=v2ray-plugin, plugin_opts=mode=websocket;tls;host=YOUR_DOMAIN;path=/YOUR_PATH — both fields are required, leaving them empty removes the disguise and the node breaks.</p>
+                <p id="nodeSocksNote" class="setting-note hidden" data-i18n="nodeSocksNote">SOCKS5 local relay: point to a local socks5 entry (sslocal/ss-local/Dante) on 127.0.0.1, e.g. server=127.0.0.1 port=10010. No password/encryption needed.</p>
+                <label class="node-field" data-node-types="hysteria2"><span data-i18n="nodeObfsLabel">Salamander 混淆密码</span><input id="nodeObfs" type="text" autocomplete="off" placeholder="obfs password" /></label>
+                <label class="node-field" data-node-types="hysteria2 vless"><span data-i18n="nodeUpLabel">上行带宽 Mbps</span><input id="nodeUp" type="number" min="1" placeholder="up Mbps" /></label>
+                <label class="node-field" data-node-types="hysteria2 vless"><span data-i18n="nodeDownLabel">下行带宽 Mbps</span><input id="nodeDown" type="number" min="1" placeholder="down Mbps" /></label>
+              </div>
+            </fieldset>
+            <fieldset class="node-form-section">
+              <legend data-i18n="nodeSecurityTitle">TLS 与证书</legend>
+              <div class="node-form-grid">
+                <label class="node-field" data-node-types="hysteria2 vless"><span data-i18n="nodeSniLabel">TLS server_name / SNI</span><input id="nodeSni" type="text" autocomplete="off" placeholder="tls server_name" /></label>
+                <label class="checkline node-field-wide" data-node-types="hysteria2 vless"><input id="nodeInsecure" type="checkbox" checked /> <span data-i18n="allowInsecure">允许不安全 TLS</span></label>
+                <div id="nodeHy2PinBlock" class="node-pin-block node-field-wide hidden" data-node-types="hysteria2">
+                  <label class="node-field"><span data-i18n="hy2PinLabel">certificate_public_key_sha256 · 证书公钥指纹</span>
+                    <input id="nodeHy2Pin" type="text" autocomplete="off" aria-label="HY2 certificate public key SHA-256" data-i18n-placeholder="hy2PinPlaceholder" placeholder="HY2 public key SHA-256 (Base64, optional)" />
+                  </label>
+                  <p id="nodeHy2PinNote" class="setting-note" data-i18n="hy2PinNote">Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.</p>
+                  <details class="node-pin-guide">
+                    <summary data-i18n="hy2PinGuideTitle">如何从自签证书计算指纹</summary>
+                    <p data-i18n="hy2PinGuideNote">在 HY2 服务端执行；先把证书路径改为该节点 tls.certificate_path 的实际值。只读取证书，不需要私钥。</p>
+                    <div class="node-command">
+                      <code id="nodeHy2PinCommand">CERT_PATH="/etc/sing-box/ssl/web.crt"
+openssl x509 -in "$CERT_PATH" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64 -A</code>
+                      <button id="nodeHy2PinCopy" type="button" class="secondary-btn" data-i18n="hy2PinCopy">复制命令</button>
+                    </div>
+                  </details>
+                </div>
+                <label class="node-field" data-node-types="vless"><span data-i18n="nodeRealityKeyLabel">REALITY 公钥</span><input id="nodePublicKey" type="text" autocomplete="off" placeholder="reality public_key" /></label>
+                <label class="node-field" data-node-types="vless"><span data-i18n="nodeShortIdLabel">REALITY short_id</span><input id="nodeShortId" type="text" autocomplete="off" placeholder="short_id" /></label>
+              </div>
+            </fieldset>
+            <div class="node-form-actions">
+              <button id="nodeSubmit" type="submit" data-i18n="addNode">添加节点</button>
+              <button id="nodeCancel" class="secondary-btn hidden" type="button" data-i18n="cancelEdit">取消</button>
+            </div>
           </form>
 
           <div id="nodeRows" class="node-rows"></div>
