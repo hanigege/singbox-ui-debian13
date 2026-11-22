@@ -744,6 +744,50 @@ button[data-i18n="updateRules"] {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.node-import {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.7fr);
+  align-items: end;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(93, 173, 255, 0.42);
+  border-radius: var(--radius-m);
+  background: rgba(46, 128, 220, 0.08);
+}
+
+.node-import h3 {
+  margin: 0 0 5px;
+  font-size: 15px;
+}
+
+.node-import p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.node-import-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.node-import textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.node-form .node-import button {
+  width: auto;
+  min-width: 116px;
+}
+
 .node-form-section legend {
   padding: 0 8px;
   color: var(--text);
@@ -2971,6 +3015,15 @@ body::before {
 }
 
 @media (max-width: 600px) {
+  .node-import,
+  .node-import-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .node-form .node-import button {
+    width: 100%;
+  }
+
   .node-form-grid {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -84,6 +84,15 @@ const translations = {
     hy2PinCopy: "Copy command",
     hy2PinCopied: "Command copied",
     hy2PinCopyFailed: "Could not copy the command",
+    nodeImportTitle: "Import proxy link",
+    nodeImportNote: "Supports hysteria2://, hy2://, vless://, ss:// and socks5://. The link is parsed only in this browser. Review the fields before adding the node.",
+    nodeImportPlaceholder: "Paste one proxy link",
+    nodeImportButton: "Parse and fill",
+    nodeImportReady: "Proxy link parsed. Review the fields, then add the node.",
+    nodeImportEmpty: "Paste a proxy link first.",
+    nodeImportUnsupported: "Unsupported proxy link protocol.",
+    nodeImportInvalid: "The proxy link is incomplete or invalid.",
+    nodeImportTransportUnsupported: "This VLESS transport is not supported by the node editor.",
     hy2PinPlaceholder: "HY2 public key SHA-256 (Base64, optional)",
     hy2PinNote: "Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.",
     hy2PinInvalid: "HY2 public key SHA-256 must be a 44-character Base64 value.",
@@ -465,6 +474,15 @@ const translations = {
     hy2PinCopy: "复制命令",
     hy2PinCopied: "命令已复制",
     hy2PinCopyFailed: "复制命令失败",
+    nodeImportTitle: "导入代理链接",
+    nodeImportNote: "支持 hysteria2://、hy2://、vless://、ss:// 和 socks5://。链接只在浏览器本地解析，导入后请核对表单，再点击添加节点。",
+    nodeImportPlaceholder: "粘贴一条代理链接",
+    nodeImportButton: "解析并填入",
+    nodeImportReady: "代理链接已解析，请核对各项参数后再添加节点。",
+    nodeImportEmpty: "请先粘贴代理链接。",
+    nodeImportUnsupported: "暂不支持这种代理链接协议。",
+    nodeImportInvalid: "代理链接不完整或格式错误。",
+    nodeImportTransportUnsupported: "节点编辑器暂不支持该 VLESS 传输方式。",
     hy2PinPlaceholder: "HY2 证书公钥 SHA-256（Base64，可选）",
     hy2PinNote: "填写可信服务端证书的公钥 SHA-256 后，需关闭「允许不安全 TLS」；指纹错误会导致该节点无法连接。",
     hy2PinInvalid: "HY2 公钥 SHA-256 必须是 44 字符的 Base64 值。",
@@ -776,6 +794,7 @@ let active = "nodes";
 let dirty = false;
 let busy = false;
 let editingNodeTag = null;
+let importedNodeDraft = null;
 let editingNodeSnapshot = "";
 let nodeEditChanged = false;
 let metaUpdatedAt = null;
@@ -2374,6 +2393,240 @@ function nodeTags() {
   return (state.nodes || []).map((node) => node.outbound.tag);
 }
 
+function decodeProxyText(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    throw new Error(t("nodeImportInvalid"));
+  }
+}
+
+function decodeProxyBase64(value) {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch (error) {
+    throw new Error(t("nodeImportInvalid"));
+  }
+}
+
+function importedNodeTag(rawTag, fallback) {
+  const decoded = decodeProxyText(rawTag || "").trim();
+  const cleaned = decoded.replace(/[^A-Za-z0-9_.@-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  const safeFallback = fallback.replace(/[^A-Za-z0-9_.@-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "imported-node";
+  const reserved = new Set(["Auto", "Proxy", "direct", "block", "dns-out"]);
+  const base = cleaned && !reserved.has(cleaned) ? cleaned : safeFallback;
+  const used = new Set(nodeTags());
+  if (!used.has(base)) return base;
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base.slice(0, Math.max(1, 64 - String(suffix).length - 1))}-${suffix}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  throw new Error(t("duplicateNode"));
+}
+
+function proxyHostname(url) {
+  return url.hostname.replace(/^\[|\]$/g, "");
+}
+
+function proxyBoolean(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
+function proxyPositiveNumber(params, ...names) {
+  for (const name of names) {
+    const raw = params.get(name);
+    if (raw == null || raw === "") continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(t("nodeImportInvalid"));
+    return value;
+  }
+  return null;
+}
+
+function parseShadowsocksLink(raw) {
+  const withoutScheme = raw.slice(raw.indexOf("://") + 3);
+  const hashIndex = withoutScheme.indexOf("#");
+  const fragment = hashIndex >= 0 ? withoutScheme.slice(hashIndex + 1) : "";
+  const withoutHash = hashIndex >= 0 ? withoutScheme.slice(0, hashIndex) : withoutScheme;
+  const queryIndex = withoutHash.indexOf("?");
+  const authorityRaw = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const params = new URLSearchParams(queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "");
+  let authority = authorityRaw;
+  const atIndex = authority.lastIndexOf("@");
+  if (atIndex < 0) {
+    authority = decodeProxyBase64(authority);
+  } else {
+    let credentials = authority.slice(0, atIndex);
+    if (!credentials.includes(":")) credentials = decodeProxyBase64(credentials);
+    authority = `${credentials}@${authority.slice(atIndex + 1)}`;
+  }
+  let parsed;
+  try {
+    parsed = new URL(`ss://${authority}`);
+  } catch (error) {
+    throw new Error(t("nodeImportInvalid"));
+  }
+  const method = decodeProxyText(parsed.username);
+  const password = decodeProxyText(parsed.password);
+  const server = proxyHostname(parsed);
+  const serverPort = Number(parsed.port);
+  if (!method || !password || !server || !serverPort) throw new Error(t("nodeImportInvalid"));
+  const outbound = {
+    type: "shadowsocks",
+    tag: importedNodeTag(fragment, `ss-${server.replace(/[^A-Za-z0-9.-]/g, "-")}`),
+    server,
+    server_port: serverPort,
+    method,
+    password,
+  };
+  const pluginValue = params.get("plugin");
+  if (pluginValue) {
+    const [plugin, ...options] = pluginValue.split(";");
+    if (plugin) outbound.plugin = plugin;
+    if (options.length) outbound.plugin_opts = options.join(";");
+  }
+  return outbound;
+}
+
+function parseProxyLink(rawValue) {
+  const raw = String(rawValue || "").trim();
+  if (!raw) throw new Error(t("nodeImportEmpty"));
+  const match = raw.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\//);
+  if (!match) throw new Error(t("nodeImportInvalid"));
+  const scheme = match[1].toLowerCase();
+  if (scheme === "ss") return parseShadowsocksLink(raw);
+  if (!["hysteria2", "hy2", "vless", "socks", "socks5"].includes(scheme)) {
+    throw new Error(t("nodeImportUnsupported"));
+  }
+  let url;
+  try {
+    url = new URL(raw);
+  } catch (error) {
+    throw new Error(t("nodeImportInvalid"));
+  }
+  const server = proxyHostname(url);
+  const serverPort = Number(url.port || (scheme.startsWith("socks") ? 1080 : 443));
+  if (!server || !serverPort) throw new Error(t("nodeImportInvalid"));
+  const params = url.searchParams;
+  const fragment = url.hash.replace(/^#/, "");
+  if (scheme === "socks" || scheme === "socks5") {
+    if (url.username || url.password) throw new Error(t("nodeImportInvalid"));
+    return {
+      type: "socks",
+      tag: importedNodeTag(fragment, `socks-${server.replace(/[^A-Za-z0-9.-]/g, "-")}`),
+      server,
+      server_port: serverPort,
+    };
+  }
+  if (scheme === "hysteria2" || scheme === "hy2") {
+    const username = decodeProxyText(url.username);
+    const passwordPart = decodeProxyText(url.password);
+    const password = passwordPart ? `${username}:${passwordPart}` : username;
+    if (!password) throw new Error(t("nodeImportInvalid"));
+    const tls = {
+      enabled: true,
+      server_name: params.get("sni") || params.get("peer") || server,
+      insecure: proxyBoolean(params.get("insecure"), false),
+    };
+    const pins = params.get("certificate_public_key_sha256");
+    if (pins) tls.certificate_public_key_sha256 = pins.split(",").map((pin) => pin.trim()).filter(Boolean);
+    const alpn = params.get("alpn");
+    if (alpn) tls.alpn = alpn.split(",").map((item) => item.trim()).filter(Boolean);
+    const outbound = {
+      type: "hysteria2",
+      tag: importedNodeTag(fragment, `hy2-${server.replace(/[^A-Za-z0-9.-]/g, "-")}`),
+      server,
+      server_port: serverPort,
+      password,
+      tls,
+    };
+    const obfsPassword = params.get("obfs-password") || params.get("obfs_password") || params.get("obfsPassword");
+    if (obfsPassword) outbound.obfs = { type: params.get("obfs") || "salamander", password: obfsPassword };
+    const upMbps = proxyPositiveNumber(params, "upmbps", "up_mbps");
+    const downMbps = proxyPositiveNumber(params, "downmbps", "down_mbps");
+    if (upMbps != null) outbound.up_mbps = upMbps;
+    if (downMbps != null) outbound.down_mbps = downMbps;
+    return outbound;
+  }
+  const transport = (params.get("type") || "tcp").toLowerCase();
+  if (!["tcp", "raw"].includes(transport)) throw new Error(t("nodeImportTransportUnsupported"));
+  const uuid = decodeProxyText(url.username);
+  if (!uuid) throw new Error(t("nodeImportInvalid"));
+  const publicKey = params.get("pbk") || params.get("publicKey") || "";
+  const shortId = params.get("sid") || params.get("shortId") || "";
+  const fingerprint = params.get("fp") || "chrome";
+  const tls = {
+    enabled: true,
+    server_name: params.get("sni") || server,
+    insecure: proxyBoolean(params.get("insecure"), false),
+    utls: { enabled: true, fingerprint },
+  };
+  if (publicKey) {
+    tls.reality = { enabled: true, public_key: publicKey };
+    if (shortId) tls.reality.short_id = shortId;
+  }
+  const outbound = {
+    type: "vless",
+    tag: importedNodeTag(fragment, `vless-${server.replace(/[^A-Za-z0-9.-]/g, "-")}`),
+    server,
+    server_port: serverPort,
+    uuid,
+    packet_encoding: params.get("packetEncoding") || "xudp",
+    tcp_fast_open: true,
+    tls,
+  };
+  const flow = params.get("flow");
+  if (flow) outbound.flow = flow;
+  return outbound;
+}
+
+function populateImportedNode(outbound, sourceLink) {
+  importedNodeDraft = structuredClone(outbound);
+  editingNodeTag = null;
+  editingNodeSnapshot = "";
+  nodeEditChanged = true;
+  $("nodeForm").reset();
+  $("nodeImportLink").value = sourceLink;
+  $("nodeType").value = outbound.type;
+  $("nodeTransportMode").value = outbound.multiplex?.brutal?.enabled ? "brutal" : "bbr";
+  $("nodeTag").value = outbound.tag || "";
+  $("nodeServer").value = outbound.server || "";
+  $("nodePort").value = outbound.server_port || "";
+  $("nodeSecret").value = outbound.type === "vless" ? outbound.uuid || "" : outbound.password || "";
+  $("nodeMethod").value = outbound.method || "";
+  $("nodePlugin").value = outbound.plugin || "";
+  $("nodePluginOpts").value = outbound.plugin_opts || "";
+  $("nodeSni").value = outbound.tls?.server_name || "";
+  $("nodeObfs").value = outbound.obfs?.password || "";
+  $("nodeHy2Pin").value = Array.isArray(outbound.tls?.certificate_public_key_sha256)
+    ? outbound.tls.certificate_public_key_sha256.join(", ")
+    : outbound.tls?.certificate_public_key_sha256 || "";
+  $("nodePublicKey").value = outbound.tls?.reality?.public_key || "";
+  $("nodeShortId").value = outbound.tls?.reality?.short_id || "";
+  $("nodeUp").value = outbound.up_mbps || outbound.multiplex?.brutal?.up_mbps || "";
+  $("nodeDown").value = outbound.down_mbps || outbound.multiplex?.brutal?.down_mbps || "";
+  $("nodeInsecure").checked = outbound.tls?.insecure === true;
+  $("nodeSubmit").textContent = t("addNode");
+  $("nodeCancel").classList.add("hidden");
+  syncNodeTransportControls();
+  updateButtons();
+  setStatus(t("nodeImportReady"), "ok");
+}
+
+function importProxyLink() {
+  try {
+    const sourceLink = $("nodeImportLink").value.trim();
+    populateImportedNode(parseProxyLink(sourceLink), sourceLink);
+  } catch (error) {
+    setStatus(error.message, "bad");
+  }
+}
+
 function enabledNodeTags() {
   return (state.nodes || []).filter((node) => node.enabled !== false).map((node) => node.outbound.tag);
 }
@@ -2747,6 +3000,7 @@ function selectNode(tag) {
   const node = getNode(tag);
   if (!node) return;
   const outbound = node.outbound;
+  importedNodeDraft = null;
   editingNodeTag = tag;
   $("nodeType").value = outbound.type || "hysteria2";
   $("nodeTransportMode").value = outbound.type === "vless" && outbound.multiplex?.brutal?.enabled ? "brutal" : "bbr";
@@ -2775,6 +3029,7 @@ function selectNode(tag) {
 }
 
 function clearNodeForm() {
+  importedNodeDraft = null;
   editingNodeTag = null;
   editingNodeSnapshot = "";
   nodeEditChanged = false;
@@ -2925,7 +3180,11 @@ function buildNodeFromForm() {
     throw new Error("Mbps must be a positive number");
   }
   const existing = editingNodeTag ? getNode(editingNodeTag) : null;
-  const base = existing && existing.outbound.type === type ? structuredClone(existing.outbound) : {};
+  const base = existing && existing.outbound.type === type
+    ? structuredClone(existing.outbound)
+    : importedNodeDraft?.type === type
+      ? structuredClone(importedNodeDraft)
+      : {};
   const duplicate = nodeTags().some((item) => item === tag && item !== editingNodeTag);
   if (!tag || duplicate) {
     throw new Error(t("duplicateNode"));
@@ -3363,6 +3622,7 @@ $("nodeTransportMode").addEventListener("change", () => {
 // method 是自由文本输入，AEAD-2022 时钟提示要随用户敲字实时显隐，
 // 故单独挂 input 监听（nodeForm 的委托监听只负责脏状态，不刷控件可用性）。
 $("nodeMethod").addEventListener("input", syncNodeTransportControls);
+$("nodeImportButton").addEventListener("click", importProxyLink);
 $("nodeHy2PinCopy").addEventListener("click", async () => {
   const command = $("nodeHy2PinCommand").textContent.trim();
   try {

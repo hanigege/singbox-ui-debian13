@@ -199,6 +199,16 @@
           </section>
 
           <form id="nodeForm" class="node-form">
+            <section class="node-import" aria-labelledby="nodeImportTitle">
+              <div>
+                <h3 id="nodeImportTitle" data-i18n="nodeImportTitle">导入代理链接</h3>
+                <p data-i18n="nodeImportNote">支持 hysteria2://、hy2://、vless://、ss:// 和 socks5://。链接只在浏览器本地解析，导入后请核对表单，再点击添加节点。</p>
+              </div>
+              <div class="node-import-row">
+                <textarea id="nodeImportLink" rows="2" autocomplete="off" spellcheck="false" data-i18n-placeholder="nodeImportPlaceholder" placeholder="粘贴代理链接"></textarea>
+                <button id="nodeImportButton" type="button" class="secondary-btn" data-i18n="nodeImportButton">解析并填入</button>
+              </div>
+            </section>
             <fieldset class="node-form-section">
               <legend data-i18n="nodeBasicTitle">基本信息</legend>
               <div class="node-form-grid">
