@@ -18,6 +18,16 @@ curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/s
 curl -fsSL --connect-timeout 15 --max-time 60 https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | GITHUB_DOWNLOAD_PREFIX=https://gh-proxy.com/ bash
 ```
 
+已有 HTTP/SOCKS 代理时可使用标准环境变量；`socks5h` 会让代理端解析 GitHub 域名，适合本地真实 DNS 无法访问 GitHub 的环境：
+
+```bash
+export ALL_PROXY='socks5h://<代理地址>:<端口>'
+curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | bash
+unset ALL_PROXY
+```
+
+HTTP 代理可将 `ALL_PROXY` 替换为 `HTTPS_PROXY='http://<代理地址>:<端口>'`。代理变量会继续传给安装器内部的 GitHub 源码和固定版本二进制下载；Debian 软件包仍从系统配置的软件源安装。
+
 Git 仓库保留 amd64 / arm64 两份官方原始归档，源码压缩包不携带大归档。一键安装先下载轻量源码包，自动检测系统架构，再从本仓库同一固定提交只获取对应归档：amd64 约 30 MiB，arm64 约 28 MiB，均包含主程序、`libcronet.so` 和许可证。安装器校验 SHA256 和 ELF 架构后使用；下载失败或校验失败会停止安装。完整 Git 克隆已有的本地归档可直接使用。下载代理同时用于源码包和选中的本仓库归档，已有 HTTP/SOCKS 代理也可以通过 curl 标准环境变量配置。
 
 最小系统若未安装 curl，先执行：
@@ -69,7 +79,7 @@ sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control
 - nftables 只管理 `inet singbox_tproxy`，整表先校验再以单事务替换。不会 flush 其它防火墙规则。
 - TProxy 重载时保留现有规则，使用 nftables 事务替换；本地规则文件更新经暂存检查后原子替换，由 sing-box 自动热加载，不重启进程。
 - DNS 劫持明确 DNAT 到实际 LAN/ULA 监听地址，不依赖 GUA/ULA 的地址顺序；公网 GUA 不提供递归解析。
-- 不修改 `/etc/resolv.conf`，不自动停止其它 DNS。若 LAN 53 端口冲突，安装失败并显示占用进程。
+- 不修改 `/etc/resolv.conf`，不自动停止其它 DNS。Debian 13 默认的 `systemd-resolved` 只监听 `127.0.0.53/54:53`，可与 sing-box 的 LAN IPv4/ULA `:53` 同时运行；只有服务绑定目标 LAN/ULA 或通配地址时才算冲突，安装会失败并显示占用进程。
 - 默认不广播 IPv6 RA、不打开系统转发。需要让机器承担三层网关时，在 `/etc/default/singbox-gateway` 显式启用 forwarding，再重启 TProxy。
 - 日志每小时检查大小、保留 6 份压缩文件；systemd 日志按系统 journal 策略管理。
 
