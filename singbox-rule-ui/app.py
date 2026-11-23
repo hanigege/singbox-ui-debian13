@@ -110,6 +110,10 @@ LOCAL_DNS_CHOICES = {
 }
 DEFAULT_LOCAL_DNS_CHOICE = "dnspod"
 LOCAL_DNS_BY_SERVER = {item["server"]: key for key, item in LOCAL_DNS_CHOICES.items()}
+DEFAULT_FAKEIP4 = "198.18.0.0/15"
+DEFAULT_FAKEIP6 = "2001:2::198:18:0:0/96"
+LEGACY_FAKEIP4 = "28.0.0.0/8"
+LEGACY_FAKEIP6 = "2001:2::/64"
 DEFAULT_INTERRUPT_EXIST_CONNECTIONS = False
 # 官方 sing-box 的 urltest 默认值（constant/timeout.go DefaultURLTestIdleTimeout=30m、
 # protocol/group/urltest.go NewURLTestGroup 里 tolerance 缺省 50）。这里显式写出来，
@@ -399,8 +403,8 @@ def normalize_list_entries(name, entries):
 def validate_greylist_ip_cidrs(entries, nodes=None, groups=None):
     fakeip = (groups if groups is not None else load_groups()).get("fakeip", {})
     fakeip_networks = (
-        ipaddress.ip_network(normalize_cidr(fakeip.get("inet4_range"), "28.0.0.0/8")),
-        ipaddress.ip_network(normalize_cidr(fakeip.get("inet6_range"), "2001:2::/64")),
+        ipaddress.ip_network(normalize_cidr(fakeip.get("inet4_range"), DEFAULT_FAKEIP4)),
+        ipaddress.ip_network(normalize_cidr(fakeip.get("inet6_range"), DEFAULT_FAKEIP6)),
     )
     protected = protected_tproxy_networks(nodes=nodes, groups=groups)
     for item in entries:
@@ -571,7 +575,7 @@ def normalize_cidr(value, default=None, strict=False):
     except Exception as exc:
         hint = ""
         if strict:
-            hint = "; use a network address, for example 28.0.0.0/8"
+            hint = f"; use a network address, for example {DEFAULT_FAKEIP4}"
         raise ValueError(f"Invalid CIDR: {value}{hint}") from exc
 
 
@@ -904,8 +908,8 @@ def extract_initial_manager_data(config):
         if isinstance(server, dict) and server.get("type") == "fakeip":
             fakeip = {
                 "tag": server.get("tag", "fakeip-dns"),
-                "inet4_range": server.get("inet4_range", "28.0.0.0/8"),
-                "inet6_range": server.get("inet6_range", "2001:2::/64"),
+                "inet4_range": server.get("inet4_range", DEFAULT_FAKEIP4),
+                "inet6_range": server.get("inet6_range", DEFAULT_FAKEIP6),
             }
             break
     for server in config.get("dns", {}).get("servers", []) or []:
@@ -935,8 +939,8 @@ def extract_initial_manager_data(config):
         "fakeip": {
             **{
                 "tag": "fakeip-dns",
-                "inet4_range": "28.0.0.0/8",
-                "inet6_range": "2001:2::/64",
+                "inet4_range": DEFAULT_FAKEIP4,
+                "inet6_range": DEFAULT_FAKEIP6,
                 "ipv6_enabled": True,
                 "block_quic": True,
             },
@@ -1009,8 +1013,8 @@ def load_groups():
     groups["auto"].setdefault("idle_timeout", DEFAULT_URLTEST_IDLE_TIMEOUT)
     groups["auto"].setdefault("tolerance", DEFAULT_URLTEST_TOLERANCE)
     groups["fakeip"].setdefault("tag", "fakeip-dns")
-    groups["fakeip"].setdefault("inet4_range", "28.0.0.0/8")
-    groups["fakeip"].setdefault("inet6_range", "2001:2::/64")
+    groups["fakeip"].setdefault("inet4_range", DEFAULT_FAKEIP4)
+    groups["fakeip"].setdefault("inet6_range", DEFAULT_FAKEIP6)
     groups["fakeip"].setdefault("ipv6_enabled", True)
     groups["fakeip"]["ipv6_enabled"] = normalize_bool(groups["fakeip"]["ipv6_enabled"])
     # FakeIP QUIC 保护固定开启，避免旧备份或旧 UI 状态把稳定性边界关掉。
@@ -1348,7 +1352,7 @@ def apply_direct_telegram_route(config):
             isinstance(rule, dict)
             and rule.get("outbound") == "Proxy"
             and isinstance(rule.get("ip_cidr"), list)
-            and any(str(item).startswith(("28.", "2001:2", "2408:")) for item in rule.get("ip_cidr", []))
+            and any(str(item).startswith(("28.", "198.18.", "198.19.", "2001:2", "2408:")) for item in rule.get("ip_cidr", []))
         ):
             insert_at = index
             break
@@ -1361,11 +1365,13 @@ def apply_direct_telegram_route(config):
 
 def apply_fakeip_route_rule(config, groups):
     fakeip = groups.get("fakeip", {})
-    fakeip4 = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
-    fakeip6 = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
+    fakeip4 = normalize_cidr(fakeip.get("inet4_range", DEFAULT_FAKEIP4), DEFAULT_FAKEIP4)
+    fakeip6 = normalize_cidr(fakeip.get("inet6_range", DEFAULT_FAKEIP6), DEFAULT_FAKEIP6)
     fake_networks = {
-        "28.0.0.0/8",
-        "2001:2::/64",
+        LEGACY_FAKEIP4,
+        LEGACY_FAKEIP6,
+        DEFAULT_FAKEIP4,
+        DEFAULT_FAKEIP6,
         fakeip4,
         fakeip6,
     }
@@ -1390,11 +1396,13 @@ def apply_fakeip_route_rule(config, groups):
 
 def apply_fakeip_quic_policy(config, groups):
     fakeip = groups.get("fakeip", {})
-    fakeip4 = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
-    fakeip6 = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
+    fakeip4 = normalize_cidr(fakeip.get("inet4_range", DEFAULT_FAKEIP4), DEFAULT_FAKEIP4)
+    fakeip6 = normalize_cidr(fakeip.get("inet6_range", DEFAULT_FAKEIP6), DEFAULT_FAKEIP6)
     fake_networks = {
-        "28.0.0.0/8",
-        "2001:2::/64",
+        LEGACY_FAKEIP4,
+        LEGACY_FAKEIP6,
+        DEFAULT_FAKEIP4,
+        DEFAULT_FAKEIP6,
         fakeip4,
         fakeip6,
     }
@@ -1461,9 +1469,9 @@ def fakeip_cache_name(fakeip: dict[str, object]) -> str:
         if not isinstance(explicit, str) or not re.fullmatch(r"cache(?:-[a-z0-9-]{1,80})?\.db", explicit):
             raise ValueError("FakeIP cache file must be named cache.db or cache-<name>.db")
         return explicit
-    ipv4 = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
-    ipv6 = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
-    if (ipv4, ipv6) == ("28.0.0.0/8", "2001:2::/64"):
+    ipv4 = normalize_cidr(fakeip.get("inet4_range", DEFAULT_FAKEIP4), DEFAULT_FAKEIP4)
+    ipv6 = normalize_cidr(fakeip.get("inet6_range", DEFAULT_FAKEIP6), DEFAULT_FAKEIP6)
+    if (ipv4, ipv6) == (DEFAULT_FAKEIP4, DEFAULT_FAKEIP6):
         return "cache.db"
     digest = hashlib.sha256(f"{ipv4}|{ipv6}".encode("ascii")).hexdigest()[:16]
     return f"cache-fakeip-{digest}.db"
@@ -1624,8 +1632,8 @@ def add_inbound_tag(config, tag):
 
 def apply_fakeip_settings(config, groups):
     fakeip = groups.get("fakeip", {})
-    inet4_range = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
-    inet6_range = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
+    inet4_range = normalize_cidr(fakeip.get("inet4_range", DEFAULT_FAKEIP4), DEFAULT_FAKEIP4)
+    inet6_range = normalize_cidr(fakeip.get("inet6_range", DEFAULT_FAKEIP6), DEFAULT_FAKEIP6)
     tag = str(fakeip.get("tag", "fakeip-dns")).strip() or "fakeip-dns"
     servers = config.setdefault("dns", {}).setdefault("servers", [])
     target = None
@@ -2624,7 +2632,7 @@ def resolve_via_system_dns(host):
 def filter_fakeip_addresses(addresses, groups=None):
     fakeip = (groups or load_groups()).get("fakeip", {})
     ranges = []
-    for value, fallback in ((fakeip.get("inet4_range"), "28.0.0.0/8"), (fakeip.get("inet6_range"), "2001:2::/64")):
+    for value, fallback in ((fakeip.get("inet4_range"), DEFAULT_FAKEIP4), (fakeip.get("inet6_range"), DEFAULT_FAKEIP6)):
         try:
             ranges.append(ipaddress.ip_network(value or fallback, strict=False))
         except ValueError:
@@ -2757,8 +2765,8 @@ def tproxy_bypass_sets(nodes=None, groups=None, normalized_lists=None):
     iface = first_default_interface()
     groups = groups or load_groups()
     fakeip = groups.get("fakeip", {})
-    fakeip4 = normalize_cidr(fakeip.get("inet4_range", "28.0.0.0/8"), "28.0.0.0/8")
-    fakeip6 = normalize_cidr(fakeip.get("inet6_range", "2001:2::/64"), "2001:2::/64")
+    fakeip4 = normalize_cidr(fakeip.get("inet4_range", DEFAULT_FAKEIP4), DEFAULT_FAKEIP4)
+    fakeip6 = normalize_cidr(fakeip.get("inet6_range", DEFAULT_FAKEIP6), DEFAULT_FAKEIP6)
     protected = [str(item) for item in protected_tproxy_networks(nodes=nodes, groups=groups)]
     bypass4 = [item for item in protected if ":" not in item]
     bypass6 = [item for item in protected if ":" in item]

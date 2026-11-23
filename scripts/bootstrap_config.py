@@ -15,8 +15,8 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 BASE_CONFIG_PATH = MANAGER_DIR / "base.json"
 NODES_PATH = MANAGER_DIR / "nodes.json"
 GROUPS_PATH = MANAGER_DIR / "groups.json"
-DEFAULT_FAKE4 = "28.0.0.0/8"
-DEFAULT_FAKE6 = "2001:2::/64"
+DEFAULT_FAKE4 = "198.18.0.0/15"
+DEFAULT_FAKE6 = "2001:2::198:18:0:0/96"
 DEFAULT_INTERRUPT_EXIST_CONNECTIONS = False
 INITIAL_NODES_FILE = os.environ.get("SING_BOX_INITIAL_NODES_FILE", "")
 # 仓库根目录（bootstrap_config.py 在 scripts/ 下，上溯一层即为仓库根）。
@@ -44,7 +44,7 @@ def normalize_cidr(value, label):
         return str(ipaddress.ip_network(value, strict=True))
     except ValueError as exc:
         # FakeIP 网段会同时写入 DNS、路由和 TProxy；必须要求网络地址，不能把主机地址静默修正成网段。
-        raise ValueError(f"{label} must be a network CIDR, for example 28.0.0.0/8") from exc
+        raise ValueError(f"{label} must be a network CIDR, for example {DEFAULT_FAKE4}") from exc
 
 
 def write_json(path, data):

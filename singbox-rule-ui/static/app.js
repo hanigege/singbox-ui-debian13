@@ -2764,8 +2764,8 @@ function renderNodes() {
   // 修改走 /api/route/final 即时生效，故只在该控件未聚焦时回填，避免用户正在选时被覆盖。
   if (document.activeElement !== $("routeFinal")) $("routeFinal").value = state.baseConfig?.routeFinal || "Proxy";
   renderLocalDnsSettings();
-  if (document.activeElement !== $("fakeipV4")) $("fakeipV4").value = state.groups.fakeip.inet4_range || "28.0.0.0/8";
-  if (document.activeElement !== $("fakeipV6")) $("fakeipV6").value = state.groups.fakeip.inet6_range || "2001:2::/64";
+  if (document.activeElement !== $("fakeipV4")) $("fakeipV4").value = state.groups.fakeip.inet4_range || "198.18.0.0/15";
+  if (document.activeElement !== $("fakeipV6")) $("fakeipV6").value = state.groups.fakeip.inet6_range || "2001:2::198:18:0:0/96";
   $("fakeipIpv6Enabled").checked = state.groups.fakeip.ipv6_enabled !== false;
   $("telegramCaptureIps").checked = state.groups.telegram.capture_ips !== false;
   state.groups.socks5 = state.groups.socks5 || {};

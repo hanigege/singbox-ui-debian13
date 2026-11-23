@@ -18,6 +18,7 @@ jobs:
       - run: python scripts/test_bundled_assets.py
       - run: python scripts/test_download_binary.py
       - run: python scripts/check_config_idempotency.py
+      - run: python scripts/test_greylist_fakeip.py
       - run: python scripts/test_auto_proxy_learning.py
       - run: python scripts/test_auto_proxy_watch.py
   native-binary:
