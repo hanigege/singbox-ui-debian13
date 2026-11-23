@@ -8,9 +8,16 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "singbox-rule-ui"))
 
 import app
+import bootstrap_config
 
 
 class GreylistFakeipTests(unittest.TestCase):
+    def test_default_ranges_match_production_and_bootstrap(self):
+        self.assertEqual(app.DEFAULT_FAKEIP4, "198.18.0.0/15")
+        self.assertEqual(app.DEFAULT_FAKEIP6, "2001:2::198:18:0:0/96")
+        self.assertEqual(bootstrap_config.DEFAULT_FAKE4, app.DEFAULT_FAKEIP4)
+        self.assertEqual(bootstrap_config.DEFAULT_FAKE6, app.DEFAULT_FAKEIP6)
+
     def test_cache_file_follows_fakeip_ranges(self):
         legacy = {"fakeip": {"inet4_range": "28.0.0.0/8", "inet6_range": "2001:2::/64"}}
         default = {"fakeip": {"inet4_range": "198.18.0.0/15", "inet6_range": "2001:2::198:18:0:0/96"}}
