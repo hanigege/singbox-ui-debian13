@@ -1,6 +1,6 @@
 # singbox-ui-debian13
 
-面向 Debian 13 minimal 的独立 sing-box 网关与 Rule UI。支持一键安装、systemd 服务管理、IPv4/IPv6 FakeIP 与 TProxy 分流，以及节点管理、黑白灰名单、DDNS、备份导入导出和运行态维护。
+面向 Debian 13 minimal 的独立 sing-box 网关与 Rule UI。支持一键安装、systemd 服务管理、IPv4/IPv6 FakeIP 与 TProxy 分流，以及节点管理、分享链接与二维码、黑白灰名单、DDNS、备份导入导出和运行态维护。
 
 ## 一键安装
 
@@ -40,10 +40,29 @@ cat /etc/sing-box/rule-ui/token
 
 初装包含示例节点，**需要在 UI 填入真实节点后才能代理上网**。也可以在首次安装时设置 `SING_BOX_INITIAL_NODES_FILE=/root/nodes.json`，内容为 `[ {"enabled":true,"outbound":{...}} ]`。示例凭据不能用于真实网络。
 
+## 可选启用 BBR
+
+BBR 不包含在 sing-box 一键安装中。它会修改主机 TCP 拥塞控制参数，并受内核及虚拟化环境影响，建议确认 sing-box 全套运行正常后再由用户单独启用。Rule UI 中的“系统 BBR / TCP”表示使用普通 TCP 传输，不会自动修改操作系统。
+
+Debian 13 VM 或裸机可使用本仓库的独立脚本。脚本只启用当前 Debian 内核已有的 `tcp_bbr`，不会安装或替换内核；容器环境会停止并提示在宿主机配置：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-bbr.sh | bash
+```
+
+验证当前状态：
+
+```bash
+sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control
+```
+
+期望分别显示 `fq` 和 `bbr`。BBR 仅作用于 TCP，主要影响 VLESS、Shadowsocks 等 TCP 出站；Hysteria2 使用 UDP，不受 BBR 影响。
+
 ## 版本和安装行为
 
 - 内置官方 sing-box **1.14.4 stable** 的 amd64 / arm64 原始发布包，路径、官方来源和 SHA256 固定在 `versions.json`。安装器使用已存在的有效归档，或从匹配源码提交的本仓库地址只下载当前架构；版本升级需要同步两份归档并通过校验和原生架构 CI，安装器不追随 latest。
 - 使用官方 Linux 二进制和 Debian glibc。不使用系统 apt 的同名 sing-box 包，避免两套服务相互覆盖。
+- 安装器通过 Debian 软件源安装二维码组件 `python3-qrcode`；节点分享二维码在本机生成，不把节点凭据发送到第三方服务。
 - 重复安装保留 `nodes/groups/base/token`、自定义规则、timer 计划和 `/etc/default/singbox-gateway`。
 - 覆盖前备份到 `/var/backups/singbox-ui/`；安装失败恢复已备份文件和之前 active 的服务。系统依赖包保留。新装失败会保留诊断数据，修正原因后可重试。
 - 所有 UI 保存与导入都先生成临时配置，执行 `sing-box check`，通过后原子落盘；运行态应用失败回滚。

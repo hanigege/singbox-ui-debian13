@@ -12,6 +12,7 @@ import threading
 import time
 import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from typing import TypedDict
 from urllib.error import HTTPError, URLError
@@ -845,6 +846,15 @@ def normalize_node(raw):
         tls["enabled"] = normalize_bool(tls.get("enabled", True))
         if "insecure" in tls:
             tls["insecure"] = normalize_bool(tls["insecure"])
+    if node_type == "hysteria2":
+        # HY2 分享目标主要是手机代理客户端；统一跳过证书校验并移除 sing-box 专用的
+        # SPKI 公钥摘要，避免节点在不同客户端之间导入后无法握手。
+        if not isinstance(tls, dict):
+            tls = {"enabled": True}
+            outbound["tls"] = tls
+        tls["enabled"] = True
+        tls["insecure"] = True
+        tls.pop("certificate_public_key_sha256", None)
     return {"enabled": normalize_bool(raw.get("enabled", True)), "outbound": outbound}
 
 
@@ -4278,6 +4288,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_bytes(self, body, content_type, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_error_json(self, message, status=400):
         self.send_json({"error": message}, status)
 
@@ -4446,6 +4463,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = self.read_json_body()
+            if parsed.path == "/api/share/qr":
+                text = payload.get("text")
+                if not isinstance(text, str) or not text.strip() or len(text) > 2048:
+                    self.send_error_json("Share link must contain 1 to 2048 characters", 400)
+                    return
+                import qrcode
+                from qrcode.image.svg import SvgPathImage
+
+                image = qrcode.make(text, image_factory=SvgPathImage, border=4, error_correction=qrcode.constants.ERROR_CORRECT_M)
+                output = BytesIO()
+                image.save(output)
+                self.send_bytes(output.getvalue(), "image/svg+xml; charset=utf-8")
+                return
             if parsed.path == "/api/save":
                 normalized_lists = normalize_payload_lists(payload.get("lists", {}))
                 nodes = normalize_nodes(payload.get("nodes", load_nodes()))

@@ -16,7 +16,7 @@ if getent ahostsv4 github.com | awk '{print $1}' | grep -Eq '^(28\.|198\.(18|19)
   exit 1
 fi
 apt-get -o APT::Update::Error-Mode=any update
-apt-get install -y --no-install-recommends ca-certificates curl python3 nftables iproute2 iputils-ping rsync util-linux logrotate procps
+apt-get install -y --no-install-recommends ca-certificates curl python3 python3-qrcode nftables iproute2 iputils-ping rsync util-linux logrotate procps
 gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$
 mkdir -p "$backup_dir"

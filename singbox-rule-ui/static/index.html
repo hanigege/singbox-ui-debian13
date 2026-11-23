@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sing-box</title>
-    <link rel="stylesheet" href="/styles.css?v=20261115-greylist-help-v3" />
+    <link rel="stylesheet" href="/styles.css?v=20261123-node-share-v2" />
   </head>
   <body>
     <div class="earth-globe" aria-hidden="true"><div class="earth-globe-map"></div></div>
@@ -252,21 +252,6 @@
               <div class="node-form-grid">
                 <label class="node-field" data-node-types="hysteria2 vless"><span data-i18n="nodeSniLabel">TLS server_name / SNI</span><input id="nodeSni" type="text" autocomplete="off" placeholder="tls server_name" /></label>
                 <label class="checkline node-field-wide" data-node-types="hysteria2 vless"><input id="nodeInsecure" type="checkbox" checked /> <span data-i18n="allowInsecure">允许不安全 TLS</span></label>
-                <div id="nodeHy2PinBlock" class="node-pin-block node-field-wide hidden" data-node-types="hysteria2">
-                  <label class="node-field"><span data-i18n="hy2PinLabel">certificate_public_key_sha256 · 证书公钥指纹</span>
-                    <input id="nodeHy2Pin" type="text" autocomplete="off" aria-label="HY2 certificate public key SHA-256" data-i18n-placeholder="hy2PinPlaceholder" placeholder="HY2 public key SHA-256 (Base64, optional)" />
-                  </label>
-                  <p id="nodeHy2PinNote" class="setting-note" data-i18n="hy2PinNote">Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.</p>
-                  <details class="node-pin-guide">
-                    <summary data-i18n="hy2PinGuideTitle">如何从自签证书计算指纹</summary>
-                    <p data-i18n="hy2PinGuideNote">在 HY2 服务端执行；先把证书路径改为该节点 tls.certificate_path 的实际值。只读取证书，不需要私钥。</p>
-                    <div class="node-command">
-                      <code id="nodeHy2PinCommand">CERT_PATH="/etc/sing-box/ssl/web.crt"
-openssl x509 -in "$CERT_PATH" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64 -A</code>
-                      <button id="nodeHy2PinCopy" type="button" class="secondary-btn" data-i18n="hy2PinCopy">复制命令</button>
-                    </div>
-                  </details>
-                </div>
                 <label class="node-field" data-node-types="vless"><span data-i18n="nodeRealityKeyLabel">REALITY 公钥</span><input id="nodePublicKey" type="text" autocomplete="off" placeholder="reality public_key" /></label>
                 <label class="node-field" data-node-types="vless"><span data-i18n="nodeShortIdLabel">REALITY short_id</span><input id="nodeShortId" type="text" autocomplete="off" placeholder="short_id" /></label>
               </div>
@@ -357,6 +342,18 @@ openssl x509 -in "$CERT_PATH" -pubkey -noout | openssl pkey -pubin -outform der 
         </section>
       </section>
     </main>
-    <script src="/app.js?v=20261115-greylist-help-v3"></script>
+    <dialog id="shareNodeDialog" class="share-dialog" aria-labelledby="shareNodeDialogTitle">
+      <div class="share-dialog-head">
+        <h2 id="shareNodeDialogTitle" data-i18n="shareNodeTitle">分享节点</h2>
+        <button id="shareNodeClose" class="secondary-btn" type="button" aria-label="Close">×</button>
+      </div>
+      <p data-i18n="shareNodeNote">此链接包含节点凭据，请仅分享给可信的人。</p>
+      <img id="shareNodeQr" alt="Node share QR code" />
+      <p id="shareQrMessage" role="status"></p>
+      <label for="shareLinkInput" data-i18n="shareLink">分享链接</label>
+      <textarea id="shareLinkInput" rows="3" readonly spellcheck="false"></textarea>
+      <button id="shareNodeCopy" type="button" class="secondary-btn" data-i18n="copyShareLink">复制链接</button>
+    </dialog>
+    <script src="/app.js?v=20261123-node-share-v2"></script>
   </body>
 </html>

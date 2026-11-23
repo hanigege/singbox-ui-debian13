@@ -78,12 +78,6 @@ const translations = {
     nodeSniLabel: "TLS server_name / SNI",
     nodeRealityKeyLabel: "REALITY public key",
     nodeShortIdLabel: "REALITY short_id",
-    hy2PinLabel: "certificate_public_key_sha256 · certificate public key pin",
-    hy2PinGuideTitle: "Get the pin from a self-signed certificate",
-    hy2PinGuideNote: "Run on the HY2 server. Replace the certificate path with this node's tls.certificate_path. The private key is not needed.",
-    hy2PinCopy: "Copy command",
-    hy2PinCopied: "Command copied",
-    hy2PinCopyFailed: "Could not copy the command",
     nodeImportTitle: "Import proxy link",
     nodeImportNote: "Supports hysteria2://, hy2://, vless://, ss:// and socks5://. The link is parsed only in this browser. Review the fields before adding the node.",
     nodeImportPlaceholder: "Paste one proxy link",
@@ -93,10 +87,14 @@ const translations = {
     nodeImportUnsupported: "Unsupported proxy link protocol.",
     nodeImportInvalid: "The proxy link is incomplete or invalid.",
     nodeImportTransportUnsupported: "This VLESS transport is not supported by the node editor.",
-    hy2PinPlaceholder: "HY2 public key SHA-256 (Base64, optional)",
-    hy2PinNote: "Use the SHA-256 of your trusted server certificate's public key. Disable insecure TLS when set. A wrong key stops this node from connecting.",
-    hy2PinInvalid: "HY2 public key SHA-256 must be a 44-character Base64 value.",
-    hy2PinRequiresVerify: "Disable insecure TLS before adding a HY2 public key pin.",
+    shareNode: "Share",
+    shareNodeTitle: "Share node",
+    shareNodeNote: "This link contains the node credentials. Share it only with trusted people.",
+    shareLink: "Share link",
+    copyShareLink: "Copy link",
+    shareLinkCopied: "Share link copied",
+    shareQrFailed: "Could not generate QR code",
+    shareQrLoading: "Generating QR code locally…",
     defaultProxy: "Default proxy",
     activeProxy: "Active proxy",
     autoSelected: "Auto selected",
@@ -468,12 +466,6 @@ const translations = {
     nodeSniLabel: "TLS server_name / SNI",
     nodeRealityKeyLabel: "REALITY 公钥",
     nodeShortIdLabel: "REALITY short_id",
-    hy2PinLabel: "certificate_public_key_sha256 · 证书公钥指纹",
-    hy2PinGuideTitle: "如何从自签证书计算指纹",
-    hy2PinGuideNote: "在 HY2 服务端执行；先把证书路径改为该节点 tls.certificate_path 的实际值。只读取证书，不需要私钥。",
-    hy2PinCopy: "复制命令",
-    hy2PinCopied: "命令已复制",
-    hy2PinCopyFailed: "复制命令失败",
     nodeImportTitle: "导入代理链接",
     nodeImportNote: "支持 hysteria2://、hy2://、vless://、ss:// 和 socks5://。链接只在浏览器本地解析，导入后请核对表单，再点击添加节点。",
     nodeImportPlaceholder: "粘贴一条代理链接",
@@ -483,10 +475,14 @@ const translations = {
     nodeImportUnsupported: "暂不支持这种代理链接协议。",
     nodeImportInvalid: "代理链接不完整或格式错误。",
     nodeImportTransportUnsupported: "节点编辑器暂不支持该 VLESS 传输方式。",
-    hy2PinPlaceholder: "HY2 证书公钥 SHA-256（Base64，可选）",
-    hy2PinNote: "填写可信服务端证书的公钥 SHA-256 后，需关闭「允许不安全 TLS」；指纹错误会导致该节点无法连接。",
-    hy2PinInvalid: "HY2 公钥 SHA-256 必须是 44 字符的 Base64 值。",
-    hy2PinRequiresVerify: "填写 HY2 公钥指纹前，请关闭「允许不安全 TLS」。",
+    shareNode: "分享",
+    shareNodeTitle: "分享节点",
+    shareNodeNote: "此链接包含节点凭据，请仅分享给可信的人。",
+    shareLink: "分享链接",
+    copyShareLink: "复制链接",
+    shareLinkCopied: "分享链接已复制",
+    shareQrFailed: "二维码生成失败",
+    shareQrLoading: "正在本机生成二维码…",
     defaultProxy: "默认代理",
     activeProxy: "当前生效",
     autoSelected: "Auto 选中",
@@ -2531,10 +2527,8 @@ function parseProxyLink(rawValue) {
     const tls = {
       enabled: true,
       server_name: params.get("sni") || params.get("peer") || server,
-      insecure: proxyBoolean(params.get("insecure"), false),
+      insecure: true,
     };
-    const pins = params.get("certificate_public_key_sha256");
-    if (pins) tls.certificate_public_key_sha256 = pins.split(",").map((pin) => pin.trim()).filter(Boolean);
     const alpn = params.get("alpn");
     if (alpn) tls.alpn = alpn.split(",").map((item) => item.trim()).filter(Boolean);
     const outbound = {
@@ -2603,14 +2597,11 @@ function populateImportedNode(outbound, sourceLink) {
   $("nodePluginOpts").value = outbound.plugin_opts || "";
   $("nodeSni").value = outbound.tls?.server_name || "";
   $("nodeObfs").value = outbound.obfs?.password || "";
-  $("nodeHy2Pin").value = Array.isArray(outbound.tls?.certificate_public_key_sha256)
-    ? outbound.tls.certificate_public_key_sha256.join(", ")
-    : outbound.tls?.certificate_public_key_sha256 || "";
   $("nodePublicKey").value = outbound.tls?.reality?.public_key || "";
   $("nodeShortId").value = outbound.tls?.reality?.short_id || "";
   $("nodeUp").value = outbound.up_mbps || outbound.multiplex?.brutal?.up_mbps || "";
   $("nodeDown").value = outbound.down_mbps || outbound.multiplex?.brutal?.down_mbps || "";
-  $("nodeInsecure").checked = outbound.tls?.insecure === true;
+  $("nodeInsecure").checked = outbound.type === "hysteria2" || outbound.tls?.insecure === true;
   $("nodeSubmit").textContent = t("addNode");
   $("nodeCancel").classList.add("hidden");
   syncNodeTransportControls();
@@ -2919,11 +2910,109 @@ function renderNodes() {
     const primaryActions = document.createElement("div");
     primaryActions.className = "node-primary-actions";
     primaryActions.append(toggle, defaultButton);
+    if (["hysteria2", "vless", "shadowsocks"].includes(outbound.type)) {
+      const share = document.createElement("button");
+      share.type = "button";
+      share.className = "secondary-btn";
+      share.textContent = t("shareNode");
+      share.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openNodeShareDialog(outbound);
+      });
+      primaryActions.appendChild(share);
+    }
     actions.append(primaryActions, remove);
     card.append(title, actions);
     rows.appendChild(card);
   }
   _r.replaceWith(rows);
+}
+
+function shareHost(server) {
+  return server.includes(":") && !server.startsWith("[") ? `[${server}]` : server;
+}
+
+function shareNodeLink(outbound) {
+  const host = shareHost(outbound.server);
+  const tag = encodeURIComponent(outbound.tag);
+  if (outbound.type === "hysteria2") {
+    const params = new URLSearchParams();
+    const tls = outbound.tls || {};
+    if (tls.server_name) params.set("sni", tls.server_name);
+    params.set("insecure", "1");
+    if (outbound.obfs?.type) params.set("obfs", outbound.obfs.type);
+    if (outbound.obfs?.password) params.set("obfs-password", outbound.obfs.password);
+    return `hysteria2://${encodeURIComponent(outbound.password)}@${host}:${outbound.server_port}/?${params}#${tag}`;
+  }
+  if (outbound.type === "vless") {
+    const tls = outbound.tls || {};
+    const params = new URLSearchParams({
+      encryption: "none",
+      security: tls.reality?.enabled ? "reality" : "tls",
+      type: "tcp",
+    });
+    if (tls.server_name) params.set("sni", tls.server_name);
+    if (tls.insecure) params.set("insecure", "1");
+    if (tls.utls?.fingerprint) params.set("fp", tls.utls.fingerprint);
+    if (tls.reality?.public_key) params.set("pbk", tls.reality.public_key);
+    if (tls.reality?.short_id) params.set("sid", tls.reality.short_id);
+    if (outbound.flow) params.set("flow", outbound.flow);
+    if (outbound.packet_encoding) params.set("packetEncoding", outbound.packet_encoding);
+    return `vless://${encodeURIComponent(outbound.uuid)}@${host}:${outbound.server_port}?${params}#${tag}`;
+  }
+  if (outbound.type === "shadowsocks") {
+    const credentialBytes = new TextEncoder().encode(`${outbound.method}:${outbound.password}`);
+    const credentials = btoa(Array.from(credentialBytes, (byte) => String.fromCharCode(byte)).join(""))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    const params = new URLSearchParams();
+    if (outbound.plugin) params.set("plugin", [outbound.plugin, outbound.plugin_opts].filter(Boolean).join(";"));
+    const query = params.toString();
+    return `ss://${credentials}@${host}:${outbound.server_port}${query ? `?${query}` : ""}#${tag}`;
+  }
+  throw new Error(t("nodeImportUnsupported"));
+}
+
+async function copyShareLink() {
+  const input = $("shareLinkInput");
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(input.value);
+  } else {
+    input.focus();
+    input.select();
+    if (!document.execCommand("copy")) throw new Error("copy command was rejected");
+  }
+  setStatus(t("shareLinkCopied"), "ok");
+}
+
+async function openNodeShareDialog(outbound) {
+  const dialog = $("shareNodeDialog");
+  const link = shareNodeLink(outbound);
+  const image = $("shareNodeQr");
+  if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+  image.removeAttribute("src");
+  $("shareQrMessage").textContent = t("shareQrLoading");
+  $("shareLinkInput").value = link;
+  $("shareNodeDialogTitle").textContent = `${t("shareNodeTitle")}: ${outbound.tag}`;
+  dialog.showModal();
+  try {
+    const response = await fetch("/api/share/qr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ text: link }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${response.status}`);
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    image.dataset.objectUrl = objectUrl;
+    image.src = objectUrl;
+    $("shareQrMessage").textContent = "";
+  } catch (error) {
+    $("shareQrMessage").textContent = `${t("shareQrFailed")}: ${error.message}`;
+  }
 }
 
 function getNode(tag) {
@@ -2961,14 +3050,13 @@ function syncNodeTransportControls() {
   }
   // SOCKS5 本地中转：只填 tag/server/port，其余字段（密码/加密/插件/TLS/obfs）全部禁用，
   // 避免用户误填后被 buildNodeFromForm 静默丢弃（socks 出站没有这些字段）。
-  const socksOnly = ["nodeSecret", "nodeMethod", "nodePlugin", "nodePluginOpts", "nodeSni", "nodeObfs", "nodePublicKey", "nodeShortId", "nodeInsecure"];
+  const socksOnly = ["nodeSecret", "nodeMethod", "nodePlugin", "nodePluginOpts", "nodeSni", "nodeObfs", "nodePublicKey", "nodeShortId"];
   socksOnly.forEach((id) => {
     const el = $(id);
     if (el) el.disabled = isSocks;
   });
-  $("nodeHy2Pin").disabled = !isHy2;
-  $("nodeHy2Pin").classList.toggle("hidden", !isHy2);
-  $("nodeHy2PinNote").classList.toggle("hidden", !isHy2);
+  $("nodeInsecure").disabled = isSocks || isHy2;
+  if (isHy2) $("nodeInsecure").checked = true;
   // AEAD-2022 时钟提示：只在 SS 且加密选了 2022-blake3-* 时显示。
   // 普通 SS 加密(chacha20/aes-gcm)没有防重放时间窗，提示会变噪音。
   const note = $("nodeClockNote");
@@ -3013,14 +3101,11 @@ function selectNode(tag) {
   $("nodePluginOpts").value = outbound.plugin_opts || "";
   $("nodeSni").value = outbound.tls?.server_name || "";
   $("nodeObfs").value = outbound.obfs?.password || "";
-  $("nodeHy2Pin").value = Array.isArray(outbound.tls?.certificate_public_key_sha256)
-    ? outbound.tls.certificate_public_key_sha256.join(", ")
-    : outbound.tls?.certificate_public_key_sha256 || "";
   $("nodePublicKey").value = outbound.tls?.reality?.public_key || "";
   $("nodeShortId").value = outbound.tls?.reality?.short_id || "";
   $("nodeUp").value = outbound.up_mbps || outbound.multiplex?.brutal?.up_mbps || "";
   $("nodeDown").value = outbound.down_mbps || outbound.multiplex?.brutal?.down_mbps || "";
-  $("nodeInsecure").checked = outbound.tls?.insecure !== false;
+  $("nodeInsecure").checked = outbound.type === "hysteria2" || outbound.tls?.insecure !== false;
   syncNodeTransportControls();
   editingNodeSnapshot = stableNodeString(buildNodeFromForm());
   nodeEditChanged = false;
@@ -3199,7 +3284,7 @@ function buildNodeFromForm() {
       ...(base.tls || {}),
       enabled: true,
       server_name: $("nodeSni").value.trim() || $("nodeServer").value.trim(),
-      insecure: $("nodeInsecure").checked,
+      insecure: type === "hysteria2" || $("nodeInsecure").checked,
     },
   };
   // sing-box 有多组 DNS 时，域名节点需明确选择解析器；节点域名用直连的本地 DNS 解析。
@@ -3215,14 +3300,7 @@ function buildNodeFromForm() {
   if (type === "hysteria2") {
     delete outbound.uuid;
     outbound.password = secret;
-    const pins = $("nodeHy2Pin").value.split(",").map((pin) => pin.trim()).filter(Boolean);
-    if (pins.length) {
-      if ($("nodeInsecure").checked) throw new Error(t("hy2PinRequiresVerify"));
-      if (pins.some((pin) => !/^[A-Za-z0-9+/]{43}=$/.test(pin))) throw new Error(t("hy2PinInvalid"));
-      outbound.tls.certificate_public_key_sha256 = [...new Set(pins)];
-    } else {
-      delete outbound.tls.certificate_public_key_sha256;
-    }
+    delete outbound.tls.certificate_public_key_sha256;
     if (upMbps !== null) outbound.up_mbps = upMbps;
     else delete outbound.up_mbps;
     if (downMbps !== null) outbound.down_mbps = downMbps;
@@ -3623,30 +3701,21 @@ $("nodeTransportMode").addEventListener("change", () => {
 // 故单独挂 input 监听（nodeForm 的委托监听只负责脏状态，不刷控件可用性）。
 $("nodeMethod").addEventListener("input", syncNodeTransportControls);
 $("nodeImportButton").addEventListener("click", importProxyLink);
-$("nodeHy2PinCopy").addEventListener("click", async () => {
-  const command = $("nodeHy2PinCommand").textContent.trim();
+$("nodeCancel").addEventListener("click", clearNodeForm);
+$("shareNodeClose").addEventListener("click", () => $("shareNodeDialog").close());
+$("shareNodeDialog").addEventListener("close", () => {
+  const image = $("shareNodeQr");
+  if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+  delete image.dataset.objectUrl;
+  image.removeAttribute("src");
+});
+$("shareNodeCopy").addEventListener("click", async () => {
   try {
-    if (window.isSecureContext && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(command);
-    } else {
-      const textarea = document.createElement("textarea");
-      textarea.value = command;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      try {
-        textarea.select();
-        if (!document.execCommand("copy")) throw new Error("copy command was rejected");
-      } finally {
-        textarea.remove();
-      }
-    }
-    setStatus(t("hy2PinCopied"), "ok");
+    await copyShareLink();
   } catch (error) {
-    setStatus(`${t("hy2PinCopyFailed")}: ${error.message}`, "bad");
+    setStatus(`${t("copyShareLink")}: ${error.message}`, "bad");
   }
 });
-$("nodeCancel").addEventListener("click", clearNodeForm);
 $("searchInput").addEventListener("input", render);
 $("typeInput").addEventListener("change", updateValueHint);
 $("saveBtn").addEventListener("click", () => save());
