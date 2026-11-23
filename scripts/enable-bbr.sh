@@ -13,10 +13,13 @@ if [ "$ID" != debian ] || [ "$VERSION_ID" != 13 ]; then
 fi
 
 container=$(systemd-detect-virt --container 2>/dev/null || true)
-if [ -n "$container" ]; then
-  echo "检测到容器环境 $container；BBR 由宿主机内核管理，请在宿主机配置。" >&2
-  exit 1
-fi
+case "$container" in
+  ''|none) ;;
+  *)
+    echo "检测到容器环境 $container；BBR 由宿主机内核管理，请在宿主机配置。" >&2
+    exit 1
+    ;;
+esac
 
 available=$(sysctl -n net.ipv4.tcp_available_congestion_control)
 case " $available " in
