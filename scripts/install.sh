@@ -110,7 +110,7 @@ systemd-analyze verify "$PROJECT_DIR"/systemd/*
 systemctl enable "${services[@]}"
 systemctl restart sing-box-tproxy sing-box singbox-rule-ui
 systemctl restart sing-box-auto-proxy-watch
-systemctl start update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer
+systemctl restart update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer
 python3 "$PROJECT_DIR/scripts/health_check.py"
 cp "$PROJECT_DIR/versions.json" /etc/sing-box/manager/installed-version.json
 echo "安装完成。备份: $backup_dir"
