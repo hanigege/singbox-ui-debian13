@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import hashlib
 import json
 import os
@@ -192,6 +193,67 @@ LEGACY_APP_RULE_SETS = {
 
 def now_stamp():
     return time.strftime("%Y%m%d-%H%M%S")
+
+
+class ImportJob(TypedDict, total=False):
+    id: str
+    status: str
+    phase: str
+    createdAt: float
+    updatedAt: float
+    error: str
+    runtime: dict[str, object]
+    rollback: dict[str, object]
+
+
+IMPORT_JOB_LOCK = threading.Lock()
+IMPORT_JOBS: dict[str, ImportJob] = {}
+IMPORT_JOB_RETENTION = 10
+
+
+def create_import_job() -> ImportJob:
+    now = time.time()
+    with IMPORT_JOB_LOCK:
+        running = next((job for job in IMPORT_JOBS.values() if job.get("status") == "running"), None)
+        if running is not None:
+            raise RuntimeError(
+                f"已有备份导入任务正在运行: operationId={running['id']}, phase={running.get('phase', 'unknown')}"
+            )
+        completed = sorted(
+            (job for job in IMPORT_JOBS.values() if job.get("status") != "running"),
+            key=lambda job: float(job.get("updatedAt", 0)),
+        )
+        while len(IMPORT_JOBS) >= IMPORT_JOB_RETENTION and completed:
+            IMPORT_JOBS.pop(completed.pop(0)["id"], None)
+        operation_id = secrets.token_urlsafe(12)
+        job: ImportJob = {
+            "id": operation_id,
+            "status": "running",
+            "phase": "scheduled",
+            "createdAt": now,
+            "updatedAt": now,
+            "error": "",
+        }
+        IMPORT_JOBS[operation_id] = job
+        return copy.deepcopy(job)
+
+
+def update_import_job(operation_id: str, **updates: object) -> ImportJob:
+    with IMPORT_JOB_LOCK:
+        job = IMPORT_JOBS.get(operation_id)
+        if job is None:
+            raise KeyError(f"未知备份导入任务: {operation_id}")
+        job.update(updates)
+        job["updatedAt"] = time.time()
+        return copy.deepcopy(job)
+
+
+def get_import_job(operation_id: str) -> ImportJob:
+    with IMPORT_JOB_LOCK:
+        job = IMPORT_JOBS.get(operation_id)
+        if job is None:
+            raise KeyError(f"未知备份导入任务: {operation_id}")
+        return copy.deepcopy(job)
 
 
 def ensure_dirs():
@@ -2150,39 +2212,78 @@ def restart_rule_ui_later(delay=1.0):
     threading.Thread(target=target, daemon=True).start()
 
 
-def apply_import_runtime_later(nodes, groups, normalized_lists, saved_result, delay=0.3):
+def apply_import_runtime_later(nodes, groups, normalized_lists, saved_result, operation_id, delay=0.3):
     def target():
         time.sleep(delay)
         try:
-            # 导入接口必须先把 HTTP 响应发回浏览器；运行态重启放后台，避免 fetch 被 OpenRC 重启链路打断。
+            # 导入接口必须先把 HTTP 响应发回浏览器；运行态重启放后台，避免当前 fetch 被服务重启链路打断。
+            update_import_job(operation_id, phase="restarting")
             restart = restart_sing_box()
             if restart["code"] != 0 or service_status() != "active":
                 # 后台应用失败时仍保留导入前的回滚语义，避免留下无法启动的新配置。
                 rollback_apply(saved_result)
-                restart_sing_box()
+                rollback_restart = restart_sing_box()
+                error = (
+                    f"sing-box 重启失败: code={restart['code']}, service={restart.get('service')}, "
+                    f"stderr={restart.get('stderr', '').strip()}"
+                )
+                update_import_job(
+                    operation_id,
+                    status="failed",
+                    phase="rolled-back",
+                    error=error,
+                    rollback={"restart": rollback_restart},
+                )
                 print(f"backup import runtime apply rolled back after restart failure: {restart}")
                 return
+            update_import_job(operation_id, phase="syncing-tproxy")
             tproxy = sync_tproxy(nodes=nodes, groups=groups, normalized_lists=normalized_lists)
             if tproxy.get("code") != 0:
                 rollback_apply(saved_result)
                 rollback_restart = restart_sing_box()
                 rollback_tproxy = sync_tproxy()
+                error = f"TProxy 同步失败: code={tproxy.get('code')}, stderr={str(tproxy.get('stderr', '')).strip()}"
+                update_import_job(
+                    operation_id,
+                    status="failed",
+                    phase="rolled-back",
+                    error=error,
+                    rollback={"restart": rollback_restart, "tproxy": rollback_tproxy},
+                )
                 print(
                     "backup import runtime apply rolled back after TProxy sync failure: "
                     f"sync={tproxy}, restart={rollback_restart}, tproxyRollback={rollback_tproxy}"
                 )
                 return
-            current_proxy_payload_after_probe(test_delays=True)
+            update_import_job(operation_id, phase="testing-delays")
+            runtime = current_proxy_payload_after_probe(test_delays=True)
+            update_import_job(operation_id, status="complete", phase="complete", runtime=runtime, error="")
         except Exception as exc:
             try:
                 rollback_apply(saved_result)
                 rollback_restart = restart_sing_box()
                 rollback_tproxy = sync_tproxy()
+                update_import_job(
+                    operation_id,
+                    status="failed",
+                    phase="rolled-back",
+                    error=f"备份导入后台应用失败: {type(exc).__name__}: {exc}",
+                    rollback={"restart": rollback_restart, "tproxy": rollback_tproxy},
+                )
                 print(
                     "backup import runtime apply rolled back after unexpected failure: "
                     f"error={exc}, restart={rollback_restart}, tproxyRollback={rollback_tproxy}"
                 )
             except Exception as rollback_exc:
+                update_import_job(
+                    operation_id,
+                    status="failed",
+                    phase="rollback-failed",
+                    error=(
+                        f"备份导入失败且回滚失败: apply={type(exc).__name__}: {exc}; "
+                        f"rollback={type(rollback_exc).__name__}: {rollback_exc}"
+                    ),
+                )
                 print(f"backup import runtime apply failed and rollback failed: error={exc}, rollback={rollback_exc}")
 
     threading.Thread(target=target, daemon=True).start()
@@ -4202,8 +4303,18 @@ def import_backup_payload(payload):
             "rollback": None,
             "tproxySync": None,
         }
-    result = apply_all(normalized_lists, nodes, groups)
-    apply_import_runtime_later(nodes, groups, normalized_lists, result)
+    operation = create_import_job()
+    try:
+        result = apply_all(normalized_lists, nodes, groups)
+    except Exception as exc:
+        update_import_job(
+            operation["id"],
+            status="failed",
+            phase="save-failed",
+            error=f"备份文件保存失败: {type(exc).__name__}: {exc}",
+        )
+        raise
+    apply_import_runtime_later(nodes, groups, normalized_lists, result, operation["id"])
     return {
         "ok": True,
         "error": "",
@@ -4213,6 +4324,7 @@ def import_backup_payload(payload):
         "rollback": None,
         "tproxySync": {"code": 0, "stdout": "", "stderr": "", "scheduled": True, "service": TPROXY_SERVICE},
         "applyScheduled": True,
+        "operation": get_import_job(operation["id"]),
         "maintenance": maintenance_status(),
         "state": load_state(),
     }
@@ -4399,6 +4511,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             filename = f"sing-box-gateway-ui-backup-{socket.gethostname()}-{now_stamp()}.json"
             self.send_download(filename, export_backup_payload())
+            return
+        if parsed.path == "/api/backup/import/status":
+            if not self.authorized():
+                self.send_error_json("Unauthorized", 401)
+                return
+            operation_id = (parse_qs(parsed.query).get("id") or [""])[0].strip()
+            if not operation_id:
+                self.send_error_json("operation id is required", 400)
+                return
+            try:
+                operation = get_import_job(operation_id)
+            except KeyError as exc:
+                self.send_error_json(str(exc), 404)
+                return
+            self.send_json({"operation": operation})
             return
         if parsed.path == "/api/delays":
             if not self.authorized():

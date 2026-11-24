@@ -14,11 +14,13 @@ jobs:
       - run: bash -n scripts/install.sh scripts/uninstall.sh scripts/stop-sing-box-tproxy scripts/update-sing-box-rules-jsdelivr scripts/pve-create-template.sh scripts/sing-box-gateway-info
       - run: sh -n scripts/quick-install.sh
       - run: node --check singbox-rule-ui/static/app.js
+      - run: node --test scripts/check_backup_import_refresh.cjs scripts/check_proxy_refresh.cjs
       - run: python scripts/bundled_assets.py
       - run: python scripts/test_bundled_assets.py
       - run: python scripts/test_download_binary.py
       - run: python scripts/check_config_idempotency.py
       - run: python scripts/test_greylist_fakeip.py
+      - run: python scripts/test_backup_import_job.py
       - run: python scripts/test_auto_proxy_learning.py
       - run: python scripts/test_auto_proxy_watch.py
   native-binary:

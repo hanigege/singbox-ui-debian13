@@ -161,6 +161,10 @@ const translations = {
     importBackup: "Import backup",
     exportingBackup: "Exporting backup",
     importingBackup: "Importing backup",
+    backupImportRestarting: "Restarting sing-box with the imported configuration",
+    backupImportSyncingTproxy: "Synchronizing TProxy",
+    backupImportTestingDelays: "Testing all imported nodes",
+    backupImportTimeout: "Backup import is still running in the background. This page will resume tracking it after a refresh.",
     backupExported: "Backup exported",
     backupImported: "Backup imported and sing-box restarted",
     backupExportedAlert: "Backup exported successfully.",
@@ -549,6 +553,10 @@ const translations = {
     importBackup: "导入备份",
     exportingBackup: "正在导出备份",
     importingBackup: "正在导入备份",
+    backupImportRestarting: "正在使用导入配置重启 sing-box",
+    backupImportSyncingTproxy: "正在同步 TProxy",
+    backupImportTestingDelays: "正在检测全部导入节点延迟",
+    backupImportTimeout: "备份仍在后台导入，刷新页面后会继续跟踪进度。",
     backupExported: "备份已导出",
     backupImported: "备份已导入，sing-box 已重启",
     backupExportedAlert: "备份导出成功。",
@@ -804,6 +812,7 @@ let dnsDelayRefreshInFlight = false;
 let logStreamController = null;
 let runtimePollTimer = null;
 const actionButtonTimers = {};
+const BACKUP_IMPORT_OPERATION_KEY = "ruleUiBackupImportOperation";
 
 const $ = (id) => document.getElementById(id);
 const t = (key) => translations[lang][key] || translations.en[key] || key;
@@ -990,6 +999,9 @@ async function load() {
     if (active === "runtime") refreshRuntime();
     setStatus(t("loaded"), "ok");
     refreshDnsDelays({ silent: true }).catch(() => {});
+    resumeBackupImportOperation().catch((error) => {
+      console.warn("backup import resume failed", { error });
+    });
   } catch (error) {
     showLogin();
     setStatus(error.message === "Unauthorized" ? t("tokenRequired") : error.message, "bad");
@@ -2215,25 +2227,29 @@ async function importBackupFromFile(event) {
     state = result.state;
     maintenance = result.maintenance || maintenance;
     proxyRequestVersion++;
-    // 导入成功后运行态由后端后台重启应用；先清掉旧缓存，再延迟刷新，避免当前 fetch 被 OpenRC 重启链路打断。
+    // 导入成功后由后端单独负责重启、同步和一轮完整测速；前端只跟踪任务状态，不重复发起测速。
     runtimeProxy = { now: null, available: false };
     delays = {};
     applyProxyPayload(result);
     setDirty(false);
     render();
-    if (result.tproxySync && result.tproxySync.code !== 0) {
-      finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
-      setStatus(`${t("backupImported")}；${t("tproxySyncFailed")}`, "bad");
-      return;
-    }
+    const operationId = result.operation?.id;
+    if (!operationId) throw new Error("Backup import operation id is missing");
+    const operation = await pollBackupImportOperation(operationId);
+    applyProxyPayload(operation.runtime || {});
+    await refreshMaintenance().catch(() => {});
+    render();
     finishActionButton("importBackupBtn", "actionDone", "done", "importBackup");
-    setStatus(t("backupImported"), "ok");
-    window.alert(t("backupImportedAlert"));
-    if (result.applyScheduled) {
-      refreshMaintenance().catch(() => {});
-      pollDelaysAfterImport();
-    } else if (!result.delays) loadProxyInfo().then(() => render()).catch(() => {});
+    const failedDelays = Object.values(operation.runtime?.delays?.delays || {}).filter((item) => !item?.ok).length;
+    setStatus(failedDelays ? `${t("backupImported")} · ${failedDelays} ${t("delayFailed")}` : t("backupImported"), failedDelays ? "warn" : "ok");
   } catch (error) {
+    try {
+      state = await api("/api/state");
+      await loadProxyInfo();
+      render();
+    } catch (refreshError) {
+      console.warn("backup import recovery refresh failed", { error: refreshError });
+    }
     finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
     setStatus(error.message || t("backupImportFailed"), "bad");
   } finally {
@@ -2241,20 +2257,63 @@ async function importBackupFromFile(event) {
   }
 }
 
-async function pollDelaysAfterImport(maxAttempts = 5, interval = 3500) {
-  for (let i = 0; i < maxAttempts; i++) {
-    if (i > 0) await sleep(interval);
+function backupImportPhaseText(phase) {
+  return t({
+    scheduled: "importingBackup",
+    restarting: "backupImportRestarting",
+    "syncing-tproxy": "backupImportSyncingTproxy",
+    "testing-delays": "backupImportTestingDelays",
+  }[phase] || "importingBackup");
+}
+
+async function pollBackupImportOperation(operationId) {
+  const nodeCount = Math.max(1, enabledNodeTags().length);
+  const deadline = Date.now() + Math.max(180000, nodeCount * 8000 + 30000);
+  sessionStorage.setItem(BACKUP_IMPORT_OPERATION_KEY, operationId);
+  while (Date.now() < deadline) {
+    const result = await api(`/api/backup/import/status?id=${encodeURIComponent(operationId)}`);
+    const operation = result.operation || {};
+    if (operation.status === "complete") {
+      sessionStorage.removeItem(BACKUP_IMPORT_OPERATION_KEY);
+      return operation;
+    }
+    if (operation.status === "failed") {
+      sessionStorage.removeItem(BACKUP_IMPORT_OPERATION_KEY);
+      throw new Error(operation.error || t("backupImportFailed"));
+    }
+    setStatus(backupImportPhaseText(operation.phase));
+    await sleep(750);
+  }
+  throw new Error(t("backupImportTimeout"));
+}
+
+async function resumeBackupImportOperation() {
+  const operationId = sessionStorage.getItem(BACKUP_IMPORT_OPERATION_KEY);
+  if (!operationId) return;
+  setBusy(true);
+  pulseActionButton("importBackupBtn", "importingBackup");
+  try {
+    const operation = await pollBackupImportOperation(operationId);
+    applyProxyPayload(operation.runtime || {});
+    state = await api("/api/state");
+    await refreshMaintenance().catch(() => {});
+    render();
+    finishActionButton("importBackupBtn", "actionDone", "done", "importBackup");
+    const failedDelays = Object.values(operation.runtime?.delays?.delays || {}).filter((item) => !item?.ok).length;
+    setStatus(failedDelays ? `${t("backupImported")} · ${failedDelays} ${t("delayFailed")}` : t("backupImported"), failedDelays ? "warn" : "ok");
+  } catch (error) {
     try {
+      state = await api("/api/state");
       await loadProxyInfo();
       render();
-      const hasDelays = Object.values(delays).some((d) => d?.ok && typeof d.delay === "number");
-      if (hasDelays) return;
-    } catch (e) {}
+    } catch (refreshError) {
+      console.warn("backup import resume recovery refresh failed", { error: refreshError });
+    }
+    finishActionButton("importBackupBtn", "actionFailed", "failed", "importBackup");
+    setStatus(error.message || t("backupImportFailed"), "bad");
+  } finally {
+    setBusy(false);
   }
-  try {
-    await loadProxyDelays();
-    render();
-  } catch (e) {}
 }
 
 function allowedEntryTypes() {
