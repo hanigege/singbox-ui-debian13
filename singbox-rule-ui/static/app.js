@@ -1077,7 +1077,7 @@ async function refreshDnsDelays(options = {}) {
 
 /**
  * @typedef {{tag?: string, ok: boolean, delay: number|null, error?: string|null}} ProxyDelay
- * @typedef {{proxy?: {ok: boolean, data?: {now?: string, autoNow?: string, autoError?: string}, error?: string}, delays?: {delays: Record<string, ProxyDelay>}} ProxyPayload
+ * @typedef {{proxy?: {ok: boolean, data?: {now?: string, autoNow?: string, autoError?: string}, error?: string}, delays?: {delays: Record<string, ProxyDelay>, previousDelays?: {delays?: Record<string, ProxyDelay>}}} ProxyPayload
  */
 
 /** @param {"/api/proxy"|"/api/delays?test=1"} path @returns {Promise<ProxyPayload|null>} */
@@ -1106,6 +1106,41 @@ function loadProxyDelays() {
   return loadProxyPayload("/api/delays?test=1");
 }
 
+/** @param {ProxyDelay|undefined} item @returns {boolean} */
+function hasMeasuredDelay(item) {
+  return typeof item?.delay === "number";
+}
+
+/**
+ * 合并延时快照：sing-box 重启后的空 history 不是测速失败，不能覆盖最后一次有效结果。
+ * 明确成功或失败的主动测速结果仍然优先，确保旧延时不会掩盖真实故障。
+ * @param {Record<string, ProxyDelay>} currentDelays
+ * @param {ProxyPayload["delays"]|undefined} payload
+ * @returns {Record<string, ProxyDelay>}
+ */
+function mergeProxyDelays(currentDelays, payload) {
+  const incoming = payload?.delays || {};
+  const beforeRestart = payload?.previousDelays?.delays || {};
+  const nextDelays = { ...currentDelays };
+  for (const [tag, item] of Object.entries(incoming)) {
+    if (item.delay == null && !item.error) {
+      const previous = hasMeasuredDelay(beforeRestart[tag])
+        ? beforeRestart[tag]
+        : hasMeasuredDelay(nextDelays[tag])
+          ? nextDelays[tag]
+          : null;
+      if (previous) {
+        nextDelays[tag] = previous;
+        continue;
+      }
+      // 测速失败会清空 Clash history；无历史记录不能抹掉本轮真实错误。
+      if (nextDelays[tag]?.error) continue;
+    }
+    nextDelays[tag] = item;
+  }
+  return nextDelays;
+}
+
 /** @param {ProxyPayload} result @returns {void} */
 function applyProxyPayload(result) {
   if (result.proxy) {
@@ -1117,14 +1152,7 @@ function applyProxyPayload(result) {
       error: result.proxy.ok ? "" : result.proxy.error,
     };
   }
-  const delayPayload = result.delays?.delays || {};
-  const nextDelays = { ...delays };
-  for (const [tag, item] of Object.entries(delayPayload)) {
-    // 测速失败会清空 Clash history；无历史记录不能抹掉本轮真实错误。
-    if (item.delay == null && !item.error && delays[tag]?.error) continue;
-    nextDelays[tag] = item;
-  }
-  delays = nextDelays;
+  delays = mergeProxyDelays(delays, result.delays);
 }
 
 function applyLanguage() {

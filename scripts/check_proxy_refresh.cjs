@@ -60,7 +60,7 @@ function contextFor(api) {
     assert.ok(declaration, `缺少状态：${name}`);
     vm.runInContext(declaration[0], context);
   }
-  for (const name of ["loadProxyPayload", "loadProxyInfo", "loadProxyDelays", "applyProxyPayload", "proxySwitchedKey", "chooseDefault", "refreshDelaysInBackground", "refreshDelays", "formatDelay", "logout", "save", "restart"]) {
+  for (const name of ["loadProxyPayload", "loadProxyInfo", "loadProxyDelays", "hasMeasuredDelay", "mergeProxyDelays", "applyProxyPayload", "proxySwitchedKey", "chooseDefault", "refreshDelaysInBackground", "refreshDelays", "formatDelay", "logout", "save", "restart"]) {
     vm.runInContext(extract(name), context);
   }
   return context;
@@ -122,6 +122,34 @@ test("测速失败不会被空历史覆盖，下一次有效测速可以清除�
   assert.equal(vm.runInContext('formatDelay("A")', context), "delayFailed");
   vm.runInContext('applyProxyPayload({delays: {delays: {A: {ok: true, delay: 42, error: null}}}})', context);
   assert.equal(vm.runInContext('formatDelay("A")', context), "42 ms");
+});
+
+test("保存重启后所有节点统一保留最后有效延时，明确测速结果再替换", () => {
+  const context = contextFor(async () => payload("A"));
+  vm.runInContext(`delays = {
+    existing: {tag: "existing", ok: true, delay: 80, error: null},
+    recent: {tag: "recent", ok: true, delay: 220, error: null}
+  }`, context);
+  vm.runInContext(`applyProxyPayload({delays: {
+    delays: {
+      existing: {tag: "existing", ok: true, delay: 90, error: null},
+      recent: {tag: "recent", ok: true, delay: null, error: null},
+      unseen: {tag: "unseen", ok: true, delay: null, error: null}
+    },
+    previousDelays: {delays: {
+      existing: {tag: "existing", ok: true, delay: 80, error: null},
+      recent: {tag: "recent", ok: true, delay: 220, error: null}
+    }}
+  }})`, context);
+  assert.equal(vm.runInContext("delays.existing.delay", context), 90);
+  assert.equal(vm.runInContext("delays.recent.delay", context), 220);
+  assert.equal(vm.runInContext("delays.unseen.delay", context), null);
+
+  vm.runInContext(`applyProxyPayload({delays: {delays: {
+    recent: {tag: "recent", ok: false, delay: null, error: "timeout"}
+  }}})`, context);
+  assert.equal(vm.runInContext("delays.recent.delay", context), null);
+  assert.equal(vm.runInContext("delays.recent.error", context), "timeout");
 });
 
 test("后台读取错误保留确认状态并记录错误，手动测速明确提示失败", async () => {
