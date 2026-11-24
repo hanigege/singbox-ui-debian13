@@ -528,6 +528,32 @@ button[data-i18n="updateRules"] {
   grid-column: 1 / -1;
 }
 
+.advanced-settings {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.advanced-settings summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.advanced-settings[open] summary {
+  margin-bottom: 10px;
+}
+
+.advanced-settings-body {
+  display: grid;
+  gap: 8px;
+}
+
+.advanced-settings-body .setting-note {
+  margin: 0;
+}
+
 .switch-field {
   flex-direction: row !important;
   align-items: center;

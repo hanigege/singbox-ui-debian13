@@ -105,7 +105,8 @@ const translations = {
     pendingDefault: "Default changed. It takes effect immediately; save persists it for the next start.",
     proxySwitchFailed: "Runtime proxy switch failed. Save can still persist the config.",
     switchingProxy: "Switching node\u2026",
-    proxySwitched: "Node switched (no restart, existing connections kept)",
+    proxySwitchedKeepConnections: "Node switched (existing connections kept; new connections use the new node)",
+    proxySwitchedInterruptConnections: "Node switched (existing connections interrupted; clients must reconnect)",
     persistFailed: "Not persisted",
     delay: "Delay",
     delayUnknown: "Not tested",
@@ -299,7 +300,9 @@ const translations = {
     nodeSsFormatNote: "Shadowsocks fill-in: method 2022-blake3-aes-256-gcm needs a 44-char base64 key from `ssservice genkey` (NOT a plain password). For Caddy/WebSocket disguise: plugin=v2ray-plugin, plugin_opts=mode=websocket;tls;host=YOUR_DOMAIN;path=/YOUR_PATH. Both fields are required — leaving plugin empty silently removes the disguise (node breaks).",
     nodeSocksNote: "SOCKS5 local relay: point to a local socks5 entry (sslocal/ss-local/Dante) on 127.0.0.1, e.g. server=127.0.0.1 port=10010. No password/encryption needed. Typical use: shadowsocks + SIP003 plugin in sing-box intermittently stalls (0-13MB/s, downloads cut off); running the official sslocal client locally and routing sing-box through it restores full speed.",
     nodeBrutalNote: "Brutal mux: padding is fixed to false (no random byte padding per packet) to cut per-packet overhead and lower gaming latency. When brutal is enabled, min_streams/max_connections are dead fields (short-circuited inside sing-mux) and need no configuration.",
+    advancedConnectionBehavior: "Advanced connection behavior",
     interruptConnections: "Interrupt old connections",
+    interruptConnectionsNote: "Keep this off for production stability. When enabled, manual selector changes and automatic URLTest changes interrupt existing inbound connections, which may disconnect games, calls, streams, and downloads. Enable it only when failed-node sessions must reconnect immediately.",
     routeFinal: "Fallback route",
     routeFinalNote: "Fallback route: where traffic that matches no rule goes. Proxy (default) routes it through the current node — all foreign sites open. direct connects directly: all domestic sites work fine, but some foreign domains may fail to load. Takes effect immediately on change (with config check + rollback).",
     routeFinalDirectWarn: "Switch fallback route to direct? Unmatched traffic will go direct: domestic sites are unaffected, but some foreign domains may fail to open. Continue?",
@@ -497,7 +500,8 @@ const translations = {
     pendingDefault: "默认节点已切换并立即生效；保存只是让它在下次启动时保持",
     proxySwitchFailed: "运行态切换失败；仍可保存配置让它持久化生效",
     switchingProxy: "正在切换节点\u2026",
-    proxySwitched: "节点已切换（无需重启，现有连接不断）",
+    proxySwitchedKeepConnections: "节点已切换（现有连接保持，新连接使用新节点）",
+    proxySwitchedInterruptConnections: "节点已切换（现有连接已中断，客户端需要重连）",
     persistFailed: "未能持久化",
     delay: "延迟",
     delayUnknown: "未检测",
@@ -691,7 +695,9 @@ const translations = {
     nodeSsFormatNote: "Shadowsocks 填写格式：加密方式选 2022-blake3-aes-256-gcm 时，密码必须是 `ssservice genkey -m 2022-blake3-aes-256-gcm` 生成的 44 字符 base64 key（不能填普通字符串密码）。WS 伪装版：插件填 v2ray-plugin，插件参数填 mode=websocket;tls;host=你的域名;path=/你的暗号。这两项必填——插件留空保存会被静默删掉，节点会退回直连而连不上。",
     nodeSocksNote: "SOCKS5 本地中转：填本机 sslocal/ss-local 等程序的 socks5 监听地址和端口（例如 server=127.0.0.1、端口=10010），无需密码/加密。典型用途：sing-box 的 shadowsocks + v2ray-plugin（SIP003）间歇性断流（下载 0-13MB/s 且中途中断）时，本机跑官方 sslocal 客户端、让 sing-box 走它的 socks5 入口，可恢复满速。",
     nodeBrutalNote: "Brutal mux：padding 固定为 false（不往包里填充随机字节），减少每包开销、降低游戏延迟。brutal 开启时 min_streams/max_connections 是死字段（sing-mux 内部短路），无需配置。",
+    advancedConnectionBehavior: "高级连接行为",
     interruptConnections: "切换时中断旧连接",
+    interruptConnectionsNote: "生产环境建议保持关闭。开启后，手动切换节点和 Auto 自动换节点都会中断现有入站连接，可能导致游戏、语音、视频和下载断线；仅在故障节点的旧连接必须立即重连时临时启用。",
     routeFinal: "兜底出口",
     routeFinalNote: "兜底出口：未匹配任何规则的流量走哪里。默认 Proxy 走当前代理节点，国外网站都能正常打开；选 direct 则未匹配流量直连——国内网站完全不受影响，但部分国外域名可能打不开。改动立即生效（带配置校验和失败回滚）。",
     routeFinalDirectWarn: "确认把兜底出口切换为 direct？未匹配规则的流量将直连：国内网站完全正常使用，但部分国外域名可能会打不开。是否继续？",
@@ -3211,11 +3217,12 @@ async function chooseDefault(tag) {
     // 后端回读确认过的运行态直接采用，无需再打一次 /api/proxy
     if (result.proxyAfterProbe) applyProxyPayload({ proxy: { ok: true, data: result.proxyAfterProbe } });
     setDirty(false);
+    const switchedMessage = t(proxySwitchedKey(state.groups));
     if (result.persistError) {
       // 运行态已切成功，只是没落盘：必须明确告知，否则重启后会悄悄回到旧节点
-      setStatus(`${t("proxySwitched")} · ${t("persistFailed")}: ${result.persistError}`, "warn");
+      setStatus(`${switchedMessage} · ${t("persistFailed")}: ${result.persistError}`, "warn");
     } else {
-      setStatus(t("proxySwitched"), "ok");
+      setStatus(switchedMessage, "ok");
     }
     // 热切不阻塞操作；若上一轮测速尚未结束，合并为随后的一轮刷新。
     refreshDelaysInBackground();
@@ -3229,6 +3236,12 @@ async function chooseDefault(tag) {
     setBusy(false);
     render();
   }
+}
+
+function proxySwitchedKey(groups) {
+  return groups?.proxy?.interrupt_exist_connections === true
+    ? "proxySwitchedInterruptConnections"
+    : "proxySwitchedKeepConnections";
 }
 
 async function refreshDelaysInBackground() {

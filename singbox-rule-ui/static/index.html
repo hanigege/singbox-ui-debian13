@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sing-box</title>
-    <link rel="stylesheet" href="/styles.css?v=20261123-node-share-v2" />
+    <link rel="stylesheet" href="/styles.css?v=20261124-interrupt-sync" />
   </head>
   <body>
     <div class="earth-globe" aria-hidden="true"><div class="earth-globe-map"></div></div>
@@ -114,10 +114,16 @@
             <div class="wide-field">
               <p id="autoIdleNote" class="setting-note" data-i18n="autoIdleNote">Periodic testing stops after the idle timeout without traffic through the Auto group, and resumes on the next connection.</p>
             </div>
-            <label class="switch-field">
-              <span data-i18n="interruptConnections">Interrupt old connections</span>
-              <input id="interruptConnections" type="checkbox" />
-            </label>
+            <details class="advanced-settings wide-field">
+              <summary data-i18n="advancedConnectionBehavior">Advanced connection behavior</summary>
+              <div class="advanced-settings-body">
+                <label class="switch-field">
+                  <span data-i18n="interruptConnections">Interrupt old connections</span>
+                  <input id="interruptConnections" type="checkbox" />
+                </label>
+                <p class="setting-note" data-i18n="interruptConnectionsNote">Keep this off for production stability. Enable it only when failed-node sessions must reconnect immediately.</p>
+              </div>
+            </details>
             <!-- 兜底出口：未匹配任何规则的流量走哪。默认 Proxy（国外站点全开）；
                  切 direct 后未匹配流量直连——国内全部正常，但部分国外域名会打不开。
                  改动立即生效（走 /api/route/final，不随 Save 按钮提交）。 -->
@@ -354,6 +360,6 @@
       <textarea id="shareLinkInput" rows="3" readonly spellcheck="false"></textarea>
       <button id="shareNodeCopy" type="button" class="secondary-btn" data-i18n="copyShareLink">复制链接</button>
     </dialog>
-    <script src="/app.js?v=20261124-backup-import-job"></script>
+    <script src="/app.js?v=20261124-interrupt-sync"></script>
   </body>
 </html>

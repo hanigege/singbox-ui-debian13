@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const { test } = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "../singbox-rule-ui/static/app.js"), "utf8");
+const markup = fs.readFileSync(path.join(__dirname, "../singbox-rule-ui/static/index.html"), "utf8");
 
 /** @param {string} name @returns {string} */
 function extract(name) {
@@ -59,7 +60,7 @@ function contextFor(api) {
     assert.ok(declaration, `缺少状态：${name}`);
     vm.runInContext(declaration[0], context);
   }
-  for (const name of ["loadProxyPayload", "loadProxyInfo", "loadProxyDelays", "applyProxyPayload", "chooseDefault", "refreshDelaysInBackground", "refreshDelays", "formatDelay", "logout", "save", "restart"]) {
+  for (const name of ["loadProxyPayload", "loadProxyInfo", "loadProxyDelays", "applyProxyPayload", "proxySwitchedKey", "chooseDefault", "refreshDelaysInBackground", "refreshDelays", "formatDelay", "logout", "save", "restart"]) {
     vm.runInContext(extract(name), context);
   }
   return context;
@@ -150,6 +151,41 @@ test("切换失败仅回读运行态，不启动全量测速", async () => {
   assert.deepEqual(calls, ["/api/proxy/default", "/api/proxy"]);
   assert.equal(context.statuses.at(-1).tone, "bad");
   assert.equal(context.renders.at(-1), "A");
+});
+
+test("切换提示与真实连接中断配置一致，高风险开关默认收进高级设置", () => {
+  const context = contextFor(async () => payload("A"));
+  assert.equal(
+    vm.runInContext('proxySwitchedKey({proxy: {interrupt_exist_connections: false}})', context),
+    "proxySwitchedKeepConnections",
+  );
+  assert.equal(
+    vm.runInContext('proxySwitchedKey({proxy: {interrupt_exist_connections: true}})', context),
+    "proxySwitchedInterruptConnections",
+  );
+  assert.match(markup, /<details class="advanced-settings wide-field">/);
+  assert.match(markup, /id="interruptConnections"/);
+});
+
+test("切换成功采用后端回传的真实连接策略文案", async () => {
+  for (const interrupt of [false, true]) {
+    const context = contextFor(async (url) => {
+      if (url === "/api/proxy/default") {
+        return {
+          state: { groups: { proxy: { default: "B", interrupt_exist_connections: interrupt } } },
+          proxyAfterProbe: { now: "B" },
+        };
+      }
+      assert.equal(url, "/api/delays?test=1");
+      return payload("B");
+    });
+    await vm.runInContext('chooseDefault("B")', context);
+    assert.equal(
+      context.statuses.at(-1).message,
+      interrupt ? "proxySwitchedInterruptConnections" : "proxySwitchedKeepConnections",
+    );
+    assert.equal(context.statuses.at(-1).tone, "ok");
+  }
 });
 
 test("手动测速期间到达的后台请求会在结束后补测", async () => {
