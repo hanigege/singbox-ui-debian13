@@ -42,6 +42,14 @@ apt-get update && apt-get install -y curl ca-certificates
 curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | RULE_UI_TOKEN='请替换成自己的长密码' bash
 ```
 
+中国大陆网络无法直连 GitHub 时，可通过第三方下载代理并同时自定义 Web 管理平台登录密码：
+
+```bash
+curl -fsSL --connect-timeout 15 --max-time 60 https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/quick-install.sh | GITHUB_DOWNLOAD_PREFIX='https://gh-proxy.com/' RULE_UI_TOKEN='请替换成自己的长密码' bash
+```
+
+第三方代理仅用于下载公开仓库文件；`RULE_UI_TOKEN` 只传给本机执行的安装脚本。密码会保留在当前 shell 历史中，请按需清理。
+
 访问 `http://<网关的局域网 IPv4>:9091`，查看随机密码：
 
 ```bash
