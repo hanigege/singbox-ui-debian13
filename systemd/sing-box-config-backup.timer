@@ -1,0 +1,10 @@
+[Unit]
+Description=每天凌晨生成一份 sing-box 网关配置快照
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=sing-box-config-backup.service
+
+[Install]
+WantedBy=timers.target
