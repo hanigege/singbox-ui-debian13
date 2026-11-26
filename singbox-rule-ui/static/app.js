@@ -2845,7 +2845,7 @@ function renderNodes() {
   if (document.activeElement !== $("autoInterval")) $("autoInterval").value = state.groups.auto.interval || "30s";
   // 官方语义：idle_timeout 是「空闲超时后停止周期测速」（省资源，见 protocol/group/urltest.go
   // loopCheck），不是重新测速；tolerance 才是节点接替的防抖阈值（Select 里 minDelay > delay+tolerance）。
-  if (document.activeElement !== $("autoIdleTimeout")) $("autoIdleTimeout").value = state.groups.auto.idle_timeout || "30m";
+  if (document.activeElement !== $("autoIdleTimeout")) $("autoIdleTimeout").value = state.groups.auto.idle_timeout || "24h";
   if (document.activeElement !== $("autoTolerance")) {
     $("autoTolerance").value = state.groups.auto.tolerance ?? 50;
   }
@@ -3863,9 +3863,9 @@ function syncNodeSettingsFromForm() {
   state.groups.auto = state.groups.auto || {};
   state.groups.auto.url = $("autoUrl").value.trim();
   state.groups.auto.interval = $("autoInterval").value.trim();
-  // idle_timeout / tolerance 现在是用户可配项（官方默认 30m / 50ms）；空值回落默认，
+  // idle_timeout / tolerance 现在是用户可配项（本项目默认 24h / 50ms；官方 idle 默认 30m）；空值回落默认，
   // 合法性（Go 时长格式、idle_timeout >= interval）由后端 normalize_payload_groups 收口校验。
-  state.groups.auto.idle_timeout = $("autoIdleTimeout").value.trim() || "30m";
+  state.groups.auto.idle_timeout = $("autoIdleTimeout").value.trim() || "24h";
   const toleranceRaw = $("autoTolerance").value.trim();
   state.groups.auto.tolerance = toleranceRaw === "" ? 50 : Number(toleranceRaw);
   state.groups.auto.interrupt_exist_connections = $("interruptConnections").checked;

@@ -109,7 +109,7 @@
               <!-- idle_timeout：空闲多久停止周期测速，必须 >= interval，否则 sing-box 拒绝启动
                    （官方 urltest.go NewURLTestGroup 的运行期检查，sing-box check 抓不到）。 -->
               <span data-i18n="autoIdleTimeout">Idle timeout</span>
-              <input id="autoIdleTimeout" type="text" autocomplete="off" placeholder="30m" />
+              <input id="autoIdleTimeout" type="text" autocomplete="off" placeholder="24h" />
             </label>
             <div class="wide-field">
               <p id="autoIdleNote" class="setting-note" data-i18n="autoIdleNote">Periodic testing stops after the idle timeout without traffic through the Auto group, and resumes on the next connection.</p>
