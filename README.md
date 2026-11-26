@@ -96,7 +96,13 @@ Debian 13 VM 或裸机启用（网关与服务端命令相同）：
 curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | bash
 ```
 
-脚本固定上游 v1.0.3 的 DKMS 源码包，地址与 SHA256 同时固定在 `versions.json` 的 `tcp_brutal` 段，下载后先验校验和再编译；经 DKMS 为当前内核编译、安装并设置开机自动加载，内核升级后 DKMS 会自动为新内核重编，重复执行不会重复安装。所在网络无法直连 GitHub 时，与一键安装一样加下载前缀：把命令换成 `curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | GITHUB_DOWNLOAD_PREFIX='https://gh-proxy.com/' bash`。容器 / LXC 环境会停止并提示在宿主机安装，因为模块归宿主机内核管理。
+脚本固定上游 v1.0.3 的 DKMS 源码包，地址与 SHA256 同时固定在 `versions.json` 的 `tcp_brutal` 段，下载后先验校验和再编译；经 DKMS 为当前内核编译、安装并设置开机自动加载，内核升级后 DKMS 会自动为新内核重编，重复执行不会重复安装。容器 / LXC 环境会停止并提示在宿主机安装，因为模块归宿主机内核管理。
+
+所在网络无法直连 GitHub 时，与一键安装一样加下载前缀，把命令换成：
+
+```bash
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | GITHUB_DOWNLOAD_PREFIX='https://gh-proxy.com/' bash
+```
 
 验证当前状态：
 
