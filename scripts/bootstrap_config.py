@@ -360,10 +360,11 @@ def main():
     enabled_tags = [node["outbound"]["tag"] for node in nodes if node.get("enabled", True)]
     if not enabled_tags:
         raise ValueError("首次安装必须至少提供一个启用的节点")
-    default_node = enabled_tags[0]
     groups = {
         # 初装默认不打断既有连接，避免 urltest 切换节点时让游戏/语音长连接掉线重连。
-        "proxy": {"default": default_node, "interrupt_exist_connections": DEFAULT_INTERRUPT_EXIST_CONNECTIONS},
+        # Proxy 默认走 Auto（urltest 自动选最快健康节点），不绑第一个节点：
+        # 单节点作默认时该节点故障即全网断流，Auto 才符合生产稳定性要求。
+        "proxy": {"default": "Auto", "interrupt_exist_connections": DEFAULT_INTERRUPT_EXIST_CONNECTIONS},
         "auto": {
             "url": "https://cp.cloudflare.com/generate_204",
             "interval": "30s",

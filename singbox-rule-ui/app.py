@@ -119,7 +119,9 @@ DEFAULT_INTERRUPT_EXIST_CONNECTIONS = False
 # 官方 sing-box 的 urltest 默认值（constant/timeout.go DefaultURLTestIdleTimeout=30m、
 # protocol/group/urltest.go NewURLTestGroup 里 tolerance 缺省 50）。这里显式写出来，
 # 是为了让 UI 能展示并让用户调整，而不是把「官方默认」伪装成不可改的固定行为。
-DEFAULT_URLTEST_IDLE_TIMEOUT = "30m"
+# 例外：idle_timeout 本项目默认 24h（而非官方 30m）——生产网关需要测速常开，
+# 30m 空闲停测会让节点健康状态出现盲区（2026-11-26 生产实测教训）；仍为用户可调项。
+DEFAULT_URLTEST_IDLE_TIMEOUT = "24h"
 DEFAULT_URLTEST_TOLERANCE = 50
 ENTRY_TYPES = ("domain", "domain_suffix", "domain_keyword", "domain_regex", "ip_cidr")
 LIST_ENTRY_TYPES = {
@@ -1070,8 +1072,9 @@ def load_groups():
     groups["auto"].setdefault("interrupt_exist_connections", DEFAULT_INTERRUPT_EXIST_CONNECTIONS)
     # urltest 默认只影响新连接；需要快速脱离坏节点时，用户可以手动开启中断旧连接。
     groups["auto"]["interrupt_exist_connections"] = normalize_bool(groups["auto"]["interrupt_exist_connections"])
-    # idle_timeout / tolerance 与官方默认值一致（constant/timeout.go DefaultURLTestIdleTimeout=30m、
-    # urltest.go NewURLTestGroup tolerance=50），但都是用户可调项，不是写死的行为。
+    # tolerance 与官方默认值一致（urltest.go NewURLTestGroup tolerance=50）；
+    # idle_timeout 本项目默认 24h（官方 30m，见 DEFAULT_URLTEST_IDLE_TIMEOUT 注释），
+    # 两者都是用户可调项，不是写死的行为。
     groups["auto"].setdefault("idle_timeout", DEFAULT_URLTEST_IDLE_TIMEOUT)
     groups["auto"].setdefault("tolerance", DEFAULT_URLTEST_TOLERANCE)
     groups["fakeip"].setdefault("tag", "fakeip-dns")
