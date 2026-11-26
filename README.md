@@ -76,6 +76,39 @@ sysctl net.core.default_qdisc net.ipv4.tcp_congestion_control
 
 期望分别显示 `fq` 和 `bbr`。BBR 仅作用于 TCP，主要影响 VLESS、Shadowsocks 等 TCP 出站；Hysteria2 使用 UDP，不受 BBR 影响。
 
+## 可选启用 TCP Brutal
+
+TCP Brutal 是 Hysteria 的 Brutal 拥塞控制在 TCP 上的内核模块实现（上游 HyNetworks/tcp-brutal）：按设定速率发包、丢包不降速，在高延迟、易丢包的线路上通常比 BBR 更稳。它不包含在 sing-box 一键安装中——模块要按当前内核编译，受内核与虚拟化环境影响——建议确认 sing-box 全套运行正常后再单独启用。
+
+**只在 UI 里选 Brutal 不会生效。** Rule UI 中把 VLESS 节点的传输模式选为 Brutal 并填上/下行，只是把 `multiplex.brutal` 写进 sing-box 配置；sing-box 自己不带这个拥塞算法，它要调用操作系统内核的 `brutal` 模块，系统没装模块时这项设置不生效。Brutal 模式下 UI 固定 `padding: false`（不往包里填充随机字节），减少每包开销。
+
+**服务端和客户端（网关）两侧都要装。** Brutal 管的是每台机器自己的发送方向：
+
+- 服务端装了，服务器 → 你这一侧的下行才走 Brutal；
+- 网关装了，你 → 服务器的上行才走 Brutal；
+- 只装一侧，就只有一侧方向受益，两侧的 sing-box 配置里也都要启用 Brutal 才行。
+
+服务端是 Debian 13 时，在服务端执行同样的脚本即可；其它发行版按上游仓库说明安装同版本（v1.0.3）模块，原理相同。
+
+Debian 13 VM 或裸机启用（网关与服务端命令相同）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | bash
+```
+
+脚本固定上游 v1.0.3 的 DKMS 源码包，地址与 SHA256 同时固定在 `versions.json` 的 `tcp_brutal` 段，下载后先验校验和再编译；经 DKMS 为当前内核编译、安装并设置开机自动加载，内核升级后 DKMS 会自动为新内核重编，重复执行不会重复安装。所在网络无法直连 GitHub 时，与一键安装一样加下载前缀：把命令换成 `curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | GITHUB_DOWNLOAD_PREFIX='https://gh-proxy.com/' bash`。容器 / LXC 环境会停止并提示在宿主机安装，因为模块归宿主机内核管理。
+
+验证当前状态：
+
+```bash
+sysctl net.ipv4.tcp_available_congestion_control
+lsmod | grep brutal
+```
+
+期望可用算法中包含 `brutal`。连接建立后用 `ss -tin` 查看单条连接，拥塞算法显示 `brutal` 即为正在使用。
+
+**UI 里填多少：** 上/下行按这台机器所在线路的实际上行、下行带宽填（例如下行 300M 的家宽在网关侧填下行 300），填得明显高于实际带宽只会自己制造丢包；两端各按各端线路填，不必相同。上游另有 v2（多一个 brutalctl 规则模式），sing-box 走应用层调用，用 v1.0.3 即可，本项目暂不跟进 v2。
+
 ## 版本和安装行为
 
 - 内置官方 sing-box **1.14.4 stable** 的 amd64 / arm64 原始发布包，路径、官方来源和 SHA256 固定在 `versions.json`。安装器使用已存在的有效归档，或从匹配源码提交的本仓库地址只下载当前架构；版本升级需要同步两份归档并通过校验和原生架构 CI，安装器不追随 latest。
