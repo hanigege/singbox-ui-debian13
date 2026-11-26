@@ -1,0 +1,4 @@
+// 自动升级范围采用 Debian 发行版默认策略（稳定版 + 安全更新，均为保守修复）；
+// 本文件只补充生产网关的两条护栏：清理无用旧内核、绝不自动重启（内核升级等人工重启生效）。
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Automatic-Reboot "false";

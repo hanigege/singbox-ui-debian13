@@ -16,11 +16,11 @@ if getent ahostsv4 github.com | awk '{print $1}' | grep -Eq '^(28\.|198\.(18|19)
   exit 1
 fi
 apt-get -o APT::Update::Error-Mode=any update
-apt-get install -y --no-install-recommends ca-certificates curl python3 python3-qrcode nftables iproute2 iputils-ping rsync util-linux logrotate procps
+apt-get install -y --no-install-recommends ca-certificates curl python3 python3-qrcode nftables iproute2 iputils-ping rsync util-linux logrotate procps unattended-upgrades
 gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$
 mkdir -p "$backup_dir"
-services=(sing-box-auto-proxy-watch.service sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer)
+services=(sing-box-auto-proxy-watch.service sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer sing-box-config-backup.timer)
 if [ -x /usr/sbin/ifup ] && systemctl cat ifupdown-wait-online.service >/dev/null 2>&1; then
   services+=(ifupdown-wait-online.service)
 fi
@@ -28,9 +28,9 @@ for service in "${services[@]}"; do
   if systemctl is-active --quiet "$service"; then echo "$service" >> "$backup_dir/active-services"; fi
   if systemctl is-enabled --quiet "$service"; then echo "$service" >> "$backup_dir/enabled-services"; fi
 done
-paths=(etc/sing-box opt/singbox-rule-ui usr/local/bin/sing-box usr/local/lib/sing-box etc/default/singbox-gateway etc/sysctl.d/99-sing-box-tproxy.conf etc/logrotate.d/sing-box-gateway etc/systemd/system/update-sing-box-rules.timer.d)
+paths=(etc/sing-box opt/singbox-rule-ui usr/local/bin/sing-box usr/local/lib/sing-box etc/default/singbox-gateway etc/sysctl.d/99-sing-box-tproxy.conf etc/sysctl.d/98-quic-udp-buffers.conf etc/apt/apt.conf.d/20auto-upgrades etc/apt/apt.conf.d/52unattended-upgrades-local etc/logrotate.d/sing-box-gateway etc/systemd/system/update-sing-box-rules.timer.d)
 for unit in "$PROJECT_DIR"/systemd/*; do paths+=("etc/systemd/system/$(basename "$unit")"); done
-for helper in refresh-sing-box-runtime-config monitor-sing-box-runtime sing-box-auto-proxy-learn sing-box-auto-proxy-watch update-sing-box-rules-jsdelivr refresh-sing-box-tproxy-setup sing-box-tproxy-setup stop-sing-box-tproxy; do paths+=("usr/local/sbin/$helper"); done
+for helper in refresh-sing-box-runtime-config monitor-sing-box-runtime sing-box-auto-proxy-learn sing-box-auto-proxy-watch update-sing-box-rules-jsdelivr refresh-sing-box-tproxy-setup sing-box-tproxy-setup stop-sing-box-tproxy sing-box-config-snapshot; do paths+=("usr/local/sbin/$helper"); done
 for helper in sing-box-gateway-info sing-box-gateway-uninstall; do paths+=("usr/local/bin/$helper"); done
 for path in "${paths[@]}"; do
   if [ -e "/$path" ]; then echo "$path" >> "$backup_dir/paths"; fi
@@ -89,6 +89,17 @@ install -m 0755 "$PROJECT_DIR/scripts/stop-sing-box-tproxy" /usr/local/sbin/stop
 install -m 0755 "$PROJECT_DIR/scripts/sing-box-gateway-info" /usr/local/bin/sing-box-gateway-info
 install -m 0755 "$PROJECT_DIR/scripts/uninstall.sh" /usr/local/bin/sing-box-gateway-uninstall
 install -m 0644 "$PROJECT_DIR/templates/logrotate.conf" /etc/logrotate.d/sing-box-gateway
+install -m 0755 "$PROJECT_DIR/scripts/sing-box-config-snapshot" /usr/local/sbin/sing-box-config-snapshot
+install -m 0644 "$PROJECT_DIR/templates/sysctl-quic-buffers.conf" /etc/sysctl.d/98-quic-udp-buffers.conf
+# 立即生效一次；LXC 等环境可能不允许写 net.core，失败不阻断安装，重启后由 systemd-sysctl 再应用。
+sysctl -p /etc/sysctl.d/98-quic-udp-buffers.conf || true
+# 自动安全/稳定更新：管理员已有同名配置时保留，不覆盖。
+if [ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
+  install -m 0644 "$PROJECT_DIR/templates/apt/20auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades
+fi
+if [ ! -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]; then
+  install -m 0644 "$PROJECT_DIR/templates/apt/52unattended-upgrades-local" /etc/apt/apt.conf.d/52unattended-upgrades-local
+fi
 install -m 0644 "$PROJECT_DIR"/systemd/* /etc/systemd/system/
 if [ ! -f /etc/default/singbox-gateway ]; then
   install -m 0600 "$PROJECT_DIR/templates/gateway.env" /etc/default/singbox-gateway
@@ -110,7 +121,7 @@ systemd-analyze verify "$PROJECT_DIR"/systemd/*
 systemctl enable "${services[@]}"
 systemctl restart sing-box-tproxy sing-box singbox-rule-ui
 systemctl restart sing-box-auto-proxy-watch
-systemctl restart update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer
+systemctl restart update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer sing-box-config-backup.timer
 python3 "$PROJECT_DIR/scripts/health_check.py"
 cp "$PROJECT_DIR/versions.json" /etc/sing-box/manager/installed-version.json
 echo "安装完成。备份: $backup_dir"

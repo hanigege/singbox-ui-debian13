@@ -1,0 +1,7 @@
+[Unit]
+Description=sing-box 网关配置每日快照
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sing-box-config-snapshot
