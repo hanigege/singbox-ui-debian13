@@ -11,5 +11,10 @@
       "sha256": "436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26",
       "path": "third_party/sing-box/v1.14.4/sing-box-1.14.4-linux-arm64.tar.gz"
     }
+  },
+  "tcp_brutal": {
+    "version": "1.0.3",
+    "url": "https://github.com/HyNetworks/tcp-brutal/releases/download/v1.0.3/tcp-brutal.dkms.tar.gz",
+    "sha256": "38526721f2e8a8c1907eb289d80526fc2bee9ca09b1f89d91362cea8ef1aad04"
   }
 }
