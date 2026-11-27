@@ -212,12 +212,14 @@ const translations = {
     homeHostPlaceholder: "Public hostname or IP, e.g. home.example.com",
     homeHostSave: "Save address",
     homeSettingsSave: "Save settings",
-    homeSettingsNote: "Every network differs: fill in your own public address (DDNS domain), LAN IP and ports. After changing a port, update the matching forwarding rule on your main router: TCP to the Reality port, UDP to the Hy2 port, both to this gateway.",
+    homeSettingsNote: "Every network differs: fill in your own public address (DDNS domain), LAN IP and ports. After changing a port, update the matching forwarding rule on your main router: TCP to the Reality port, UDP to the Hy2 port, both to this gateway. LAN-only devices use their own pair of ports, so forward those two as well (TCP + UDP) if you use LAN-only mode.",
     homeLanIpAuto: "Auto-detect (now: ",
     homeLanCidrs: "Extra LAN ranges",
     homeLanCidrsPlaceholder: "Comma separated, e.g. 192.168.2.0/24",
     homeRealityPort: "Reality port (TCP)",
     homeHy2Port: "Hy2 port (UDP)",
+    homeLanRealityPort: "LAN-only Reality port (TCP)",
+    homeLanHy2Port: "LAN-only Hy2 port (UDP)",
     homeLanIp: "Gateway LAN IP",
     homePort: "Port",
     homeServerName: "SNI",
@@ -230,6 +232,11 @@ const translations = {
     homeShare: "Share",
     homeDownload: "Download JSON",
     homeRotate: "Rotate credentials",
+    homeMode: "Access",
+    homeModeFull: "LAN + Internet",
+    homeModeLanOnly: "LAN only",
+    homeConfirmModeLan: "Switch this device to LAN only? It will reach only your home network through the tunnel; everything else uses its own network. The gateway enforces this even if the client config is edited. The device must re-import its profile afterwards.",
+    homeConfirmModeFull: "Switch this device to full access (LAN + Internet through the gateway)? The device must re-import its profile afterwards.",
     homeRotateSub: "Rotate subscription token",
     homeRemove: "Remove",
     homeEnableDevice: "Enable",
@@ -654,12 +661,14 @@ const translations = {
     homeHostPlaceholder: "公网域名或 IP，如 home.example.com",
     homeHostSave: "保存地址",
     homeSettingsSave: "保存设置",
-    homeSettingsNote: "每台机器的网络环境不同：公网地址（DDNS 域名）、内网 IP 和端口都按你自己的网络填。改过端口后，记得去主路由同步转发规则：TCP 转发到 Reality 端口、UDP 转发到 Hy2 端口，目标都是本网关。",
+    homeSettingsNote: "每台机器的网络环境不同：公网地址（DDNS 域名）、内网 IP 和端口都按你自己的网络填。改过端口后，记得去主路由同步转发规则：TCP 转发到 Reality 端口、UDP 转发到 Hy2 端口，目标都是本网关。仅内网设备走自己的一对端口，用到仅内网模式时，这两个端口（TCP+UDP）也要一并转发。",
     homeLanIpAuto: "留空自动检测（当前：",
     homeLanCidrs: "额外内网段",
     homeLanCidrsPlaceholder: "逗号分隔，如 192.168.2.0/24",
     homeRealityPort: "Reality 端口（TCP）",
     homeHy2Port: "Hy2 端口（UDP）",
+    homeLanRealityPort: "仅内网 Reality 端口（TCP）",
+    homeLanHy2Port: "仅内网 Hy2 端口（UDP）",
     homeLanIp: "网关内网 IP",
     homePort: "端口",
     homeServerName: "SNI",
@@ -672,6 +681,11 @@ const translations = {
     homeShare: "分享",
     homeDownload: "下载 JSON",
     homeRotate: "轮换凭据",
+    homeMode: "模式",
+    homeModeFull: "内网+外网",
+    homeModeLanOnly: "仅内网",
+    homeConfirmModeLan: "把这台设备切换为「仅内网」？它经隧道只能访问家里内网，其余流量走它自己的网络；网关会强制执行，改客户端配置也绕不过去。切换后该设备需要重新导入配置。",
+    homeConfirmModeFull: "把这台设备切换为「内网+外网」（经网关访问内网和外网）？切换后该设备需要重新导入配置。",
     homeRotateSub: "轮换订阅 token",
     homeRemove: "删除",
     homeEnableDevice: "启用",
@@ -3323,12 +3337,18 @@ function renderHome() {
   realityPortInput.inputMode = "numeric";
   const hy2PortInput = textInput(String(server.hy2.port), "8443", 5);
   hy2PortInput.inputMode = "numeric";
+  const lanRealityPortInput = textInput(String(server.reality.lanPort), "8445", 5);
+  lanRealityPortInput.inputMode = "numeric";
+  const lanHy2PortInput = textInput(String(server.hy2.lanPort), "8445", 5);
+  lanHy2PortInput.inputMode = "numeric";
   const lanCidrsInput = textInput((server.lanCidrs || []).join(", "), t("homeLanCidrsPlaceholder"), 256);
   form.append(
     field(t("homeHost"), hostInput),
     field(t("homeLanIp"), lanIpInput),
     field(t("homeRealityPort"), realityPortInput),
     field(t("homeHy2Port"), hy2PortInput),
+    field(t("homeLanRealityPort"), lanRealityPortInput),
+    field(t("homeLanHy2Port"), lanHy2PortInput),
     field(t("homeLanCidrs"), lanCidrsInput),
   );
   const saveRow = document.createElement("div");
@@ -3343,6 +3363,8 @@ function renderHome() {
     lanCidrs: lanCidrsInput.value.trim(),
     realityPort: Number(realityPortInput.value),
     hy2Port: Number(hy2PortInput.value),
+    lanRealityPort: Number(lanRealityPortInput.value),
+    lanHy2Port: Number(lanHy2PortInput.value),
   }));
   saveRow.append(saveBtn);
   const note = document.createElement("p");
@@ -3384,6 +3406,16 @@ function renderHome() {
     toggleBtn.className = "secondary-btn";
     toggleBtn.textContent = device.enabled ? t("homeDisableDevice") : t("homeEnableDevice");
     toggleBtn.addEventListener("click", () => homeDeviceAction("/api/home/devices/toggle", { id: device.id, enabled: !device.enabled }));
+    const modeBtn = document.createElement("button");
+    modeBtn.type = "button";
+    modeBtn.className = "secondary-btn";
+    const lanOnly = device.mode === "lan_only";
+    modeBtn.textContent = `${t("homeMode")}：${lanOnly ? t("homeModeLanOnly") : t("homeModeFull")}`;
+    modeBtn.addEventListener("click", () => {
+      if (window.confirm(lanOnly ? t("homeConfirmModeFull") : t("homeConfirmModeLan"))) {
+        homeDeviceAction("/api/home/devices/mode", { id: device.id, mode: lanOnly ? "full" : "lan_only" });
+      }
+    });
     const rotateBtn = document.createElement("button");
     rotateBtn.type = "button";
     rotateBtn.className = "secondary-btn";
@@ -3405,7 +3437,7 @@ function renderHome() {
     removeBtn.addEventListener("click", () => {
       if (window.confirm(t("homeConfirmRemove"))) homeDeviceAction("/api/home/devices/remove", { id: device.id });
     });
-    actions.append(shareBtn, downloadBtn, toggleBtn, rotateBtn, rotateSubBtn, removeBtn);
+    actions.append(shareBtn, downloadBtn, toggleBtn, modeBtn, rotateBtn, rotateSubBtn, removeBtn);
     card.append(head, actions);
     deviceBox.appendChild(card);
   });

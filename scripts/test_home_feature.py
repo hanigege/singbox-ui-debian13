@@ -216,6 +216,55 @@ finally:
     except Exception:
         proc.kill()
 
+# --- 5c. 设备模式：仅内网的配置结构 + 网关强制规则 ---
+def set_mode(mode):
+    def mut(h):
+        h["devices"][0]["mode"] = mode
+    return app.apply_home_change(mut)
+
+check("apply set lan_only ok", set_mode("lan_only")["ok"] is True)
+home_now = app.load_home()
+rendered_lan = app.render_config()
+rules_lan = rendered_lan["route"]["rules"]
+check("gateway guard rules prepended for lan inbounds (tag match, no user)",
+      len(rules_lan) >= 2
+      and rules_lan[0].get("inbound") == ["vless-reality-home-lan", "hy2-home-lan"] and rules_lan[0].get("ip_is_private") is True and rules_lan[0].get("outbound") == "direct" and "user" not in rules_lan[0]
+      and rules_lan[1].get("inbound") == ["vless-reality-home-lan", "hy2-home-lan"] and rules_lan[1].get("action") == "reject",
+      str(rules_lan[:2]))
+in_lan = {i["tag"]: i for i in rendered_lan["inbounds"] if i.get("tag", "").endswith("-lan")}
+check("lan inbounds rendered on lan ports with only the lan_only user",
+      in_lan.get("vless-reality-home-lan", {}).get("listen_port") == 8445
+      and [u["name"] for u in in_lan["vless-reality-home-lan"]["users"]] == [device["name"]]
+      and in_lan.get("hy2-home-lan", {}).get("listen_port") == 8445
+      and [u["name"] for u in in_lan["hy2-home-lan"]["users"]] == [device["name"]],
+      str({k: v.get("listen_port") for k, v in in_lan.items()}))
+main_users = [u["name"] for i in rendered_lan["inbounds"] if i.get("tag") == "vless-reality-home" for u in i["users"]]
+check("main inbound no longer carries the lan_only user", device["name"] not in main_users, str(main_users))
+code, out = gateway_check(rendered_lan, "rendered-lanonly.json")
+check("gateway with lan inbounds + guard: sing-box check", code == 0, out)
+profile_lan = app.build_home_client_profile(home_now, home_now["devices"][0])
+check("lan_only profile route final is direct", profile_lan["route"]["final"] == "direct")
+check("lan_only profile dns final is bootstrap", profile_lan["dns"]["final"] == "bootstrap")
+check("lan_only profile keeps LAN rule, drops DoT reject",
+      any(r.get("ip_cidr") for r in profile_lan["route"]["rules"])
+      and not any(r.get("port") == [853, 784, 8853] for r in profile_lan["route"]["rules"]))
+check("lan_only profile points at lan ports",
+      {o["tag"]: o.get("server_port") for o in profile_lan["outbounds"] if o.get("server_port")} == {"home-vless": 8445, "home-hy2": 8445},
+      str(profile_lan["outbounds"]))
+links_lan = app.build_home_share_links(home_now, home_now["devices"][0])
+check("lan_only share links use lan ports",
+      ":8445" in links_lan.get("vless", "") and ":8445" in links_lan.get("hysteria2", ""),
+      str(links_lan))
+pfile3 = ROOT / "client-profile-lanonly.json"
+pfile3.write_text(json.dumps(profile_lan, indent=2, ensure_ascii=False))
+code, out = sing_box_check(pfile3)
+check("lan_only client profile: sing-box check", code == 0, out)
+check("apply set full ok", set_mode("full")["ok"] is True)
+rendered_full = app.render_config()
+check("no guard rules / no lan inbounds when all devices are full",
+      not any(r.get("inbound") and any(str(t).endswith("-lan") for t in r["inbound"]) for r in rendered_full["route"]["rules"])
+      and not any(i.get("tag", "").endswith("-lan") for i in rendered_full["inbounds"]))
+
 # --- 6. HTTP 层：/sub 与 /api/home ---
 (ROOT / "rule-ui").mkdir(parents=True, exist_ok=True)
 (ROOT / "rule-ui" / "token").write_text("test-token-123456\n")
@@ -285,6 +334,22 @@ status, _ = http_post("/api/home/server/settings", {"lanCidrs": "10.0.0.0/33"})
 check("POST settings bad CIDR -> 400", status == 400, f"{status}")
 status, _ = http_post("/api/home/server/settings", {"realityPort": 8443, "hy2Port": 8443, "lanIp": ""})
 check("POST settings restore defaults -> 200", status == 200, f"{status}")
+dev_id = app.load_home()["devices"][0]["id"]
+status, body = http_post("/api/home/devices/mode", {"id": dev_id, "mode": "lan_only"})
+check("POST devices/mode lan_only -> 200 + view shows mode",
+      status == 200 and '"mode": "lan_only"' in body, f"{status}")
+status, _ = http_post("/api/home/devices/mode", {"id": dev_id, "mode": "bogus"})
+check("POST devices/mode invalid -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/devices/mode", {"id": dev_id, "mode": "full"})
+check("POST devices/mode back to full -> 200", status == 200, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"lanRealityPort": 8443})
+check("POST settings lan port == main port -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"lanRealityPort": 18445, "lanHy2Port": 18446})
+check("POST settings lan ports -> 200 + persisted",
+      status == 200 and app.load_home()["server"]["reality"]["lan_port"] == 18445 and app.load_home()["server"]["hy2"]["lan_port"] == 18446,
+      f"{status}")
+status, _ = http_post("/api/home/server/settings", {"lanRealityPort": 8445, "lanHy2Port": 8445})
+check("POST settings lan ports restore -> 200", status == 200, f"{status}")
 server.shutdown()
 
 print("\nRESULT:", "ALL PASS" if not fails else f"{len(fails)} FAILURES: {fails}")

@@ -39,7 +39,10 @@ HOME_AUDIT_PATH = MANAGER_DIR / "home-audit.log"
 HOME_HY2_CERT_DIR = Path(os.environ.get("RULE_UI_HOME_HY2_CERT_DIR", "/etc/sing-box/home-hy2"))
 HOME_REALITY_TAG = "vless-reality-home"
 HOME_HY2_TAG = "hy2-home"
-HOME_TAGS = (HOME_REALITY_TAG, HOME_HY2_TAG)
+HOME_REALITY_LAN_TAG = "vless-reality-home-lan"
+HOME_HY2_LAN_TAG = "hy2-home-lan"
+HOME_TAGS = (HOME_REALITY_TAG, HOME_HY2_TAG, HOME_REALITY_LAN_TAG, HOME_HY2_LAN_TAG)
+HOME_LAN_TAGS = (HOME_REALITY_LAN_TAG, HOME_HY2_LAN_TAG)
 HOME_DEFAULT_HOST = ""  # 公网地址没有通用默认：管理员在「回家」页填写自己的域名/IP
 HOME_DEFAULT_SERVER_NAME = "www.microsoft.com"
 # 2026-11-27 手工加在 base.json 里的 Reality 回家入站凭据文件；迁移导入时用它补 public_key（如果存在）。
@@ -1222,6 +1225,7 @@ def default_home_config():
             "reality": {
                 "enabled": False,
                 "port": 8443,
+                "lan_port": 8445,
                 "server_name": HOME_DEFAULT_SERVER_NAME,
                 "private_key": "",
                 "public_key": "",
@@ -1230,6 +1234,7 @@ def default_home_config():
             "hy2": {
                 "enabled": False,
                 "port": 8443,
+                "lan_port": 8445,
                 "server_name": HOME_DEFAULT_SERVER_NAME,
                 "obfs_password": "",
                 "cert_path": str(HOME_HY2_CERT_DIR / "cert.pem"),
@@ -1273,6 +1278,12 @@ def normalize_home(data):
                 target["port"] = 8443
             if not (1 <= target["port"] <= 65535):
                 target["port"] = 8443
+            try:
+                target["lan_port"] = int(target.get("lan_port") or 8445)
+            except (TypeError, ValueError):
+                target["lan_port"] = 8445
+            if not (1 <= target["lan_port"] <= 65535):
+                target["lan_port"] = 8445
         reality = home["server"]["reality"]
         short_id = reality.get("short_id") or []
         if isinstance(short_id, str):
@@ -1294,6 +1305,7 @@ def normalize_home(data):
                 "hy2_password": str(raw.get("hy2_password") or "").strip(),
                 "sub_token": str(raw.get("sub_token") or "").strip(),
                 "enabled": bool(raw.get("enabled", True)),
+                "mode": raw.get("mode") if raw.get("mode") in ("full", "lan_only") else "full",
                 "created_at": str(raw.get("created_at") or ""),
             }
         )
@@ -1413,54 +1425,71 @@ def build_home_inbounds(home):
     if not devices:
         return []
     server = home["server"]
+    # 全网设备走主入站；仅内网设备走独立的 -lan 入站（独立端口）。
+    # 网关强制规则按入站 tag 匹配（sing-box 的 user 匹配在 1.14 实测不生效，
+    # 2026-11-28 生产日志证实），不用用户名区分。
+    full_devices = [d for d in devices if d.get("mode") != "lan_only"]
+    lan_devices = [d for d in devices if d.get("mode") == "lan_only"]
     inbounds = []
     reality = server["reality"]
     if reality.get("enabled") and reality.get("private_key"):
-        inbounds.append(
-            {
-                "type": "vless",
-                "tag": HOME_REALITY_TAG,
-                "listen": "::",
-                "listen_port": reality["port"],
-                "users": [{"name": device["name"], "uuid": device["uuid"]} for device in devices],
-                "tls": {
-                    "enabled": True,
-                    "server_name": reality["server_name"],
-                    "reality": {
+        for tag, port, members in (
+            (HOME_REALITY_TAG, reality["port"], full_devices),
+            (HOME_REALITY_LAN_TAG, reality["lan_port"], lan_devices),
+        ):
+            if not members:
+                continue
+            inbounds.append(
+                {
+                    "type": "vless",
+                    "tag": tag,
+                    "listen": "::",
+                    "listen_port": port,
+                    "users": [{"name": device["name"], "uuid": device["uuid"]} for device in members],
+                    "tls": {
                         "enabled": True,
-                        "handshake": {"server": reality["server_name"], "server_port": 443},
-                        "private_key": reality["private_key"],
-                        "short_id": reality["short_id"],
+                        "server_name": reality["server_name"],
+                        "reality": {
+                            "enabled": True,
+                            "handshake": {"server": reality["server_name"], "server_port": 443},
+                            "private_key": reality["private_key"],
+                            "short_id": reality["short_id"],
+                        },
                     },
-                },
-            }
-        )
+                }
+            )
     hy2 = server["hy2"]
     if hy2.get("enabled") and hy2.get("obfs_password"):
-        inbound = {
-            "type": "hysteria2",
-            "tag": HOME_HY2_TAG,
-            "listen": "::",
-            "listen_port": hy2["port"],
-            "users": [
+        for tag, port, members in (
+            (HOME_HY2_TAG, hy2["port"], full_devices),
+            (HOME_HY2_LAN_TAG, hy2["lan_port"], lan_devices),
+        ):
+            users = [
                 {"name": device["name"], "password": device["hy2_password"]}
-                for device in devices
+                for device in members
                 if device.get("hy2_password")
-            ],
-            # 不设 up/down + ignore_client_bandwidth=true：全员走 BBR，
-            # 避免客户端自报带宽触发 Brutal 后在家庭宽带上抢占失控（稳定优先）。
-            "ignore_client_bandwidth": True,
-            "tls": {
-                "enabled": True,
-                "server_name": hy2["server_name"],
-                "alpn": ["h3"],
-                "certificate_path": hy2["cert_path"],
-                "key_path": hy2["key_path"],
-            },
-        }
-        if hy2.get("obfs_password"):
-            inbound["obfs"] = {"type": "salamander", "password": hy2["obfs_password"]}
-        if inbound["users"]:
+            ]
+            if not users:
+                continue
+            inbound = {
+                "type": "hysteria2",
+                "tag": tag,
+                "listen": "::",
+                "listen_port": port,
+                "users": users,
+                # 不设 up/down + ignore_client_bandwidth=true：全员走 BBR，
+                # 避免客户端自报带宽触发 Brutal 后在家庭宽带上抢占失控（稳定优先）。
+                "ignore_client_bandwidth": True,
+                "tls": {
+                    "enabled": True,
+                    "server_name": hy2["server_name"],
+                    "alpn": ["h3"],
+                    "certificate_path": hy2["cert_path"],
+                    "key_path": hy2["key_path"],
+                },
+            }
+            if hy2.get("obfs_password"):
+                inbound["obfs"] = {"type": "salamander", "password": hy2["obfs_password"]}
             inbounds.append(inbound)
     return inbounds
 
@@ -1478,6 +1507,32 @@ def apply_home_inbounds(config):
     ]
     inbounds.extend(build_home_inbounds(load_home()))
     config["inbounds"] = inbounds
+    return config
+
+
+def apply_home_route_rules(config):
+    """「仅内网」入站的网关侧强制规则，插到路由规则最前面。
+
+    按入站 tag 匹配：从 -lan 入站进来的流量，内网目标走 direct，其余
+    一律 reject——即使用户拿分享链接自己组全量隧道配置，也借不到网关
+    的代理出口。没有仅内网设备（即没有 -lan 入站）时不注入任何规则，
+    渲染结果与未启用此功能时逐字一致。
+    """
+    present = {
+        item.get("tag")
+        for item in config.get("inbounds", []) or []
+        if isinstance(item, dict)
+    }
+    lan_tags = [tag for tag in HOME_LAN_TAGS if tag in present]
+    if not lan_tags:
+        return config
+    route = config.setdefault("route", {})
+    rules = route.get("rules") or []
+    guard = [
+        {"inbound": lan_tags, "ip_is_private": True, "outbound": "direct"},
+        {"inbound": lan_tags, "action": "reject"},
+    ]
+    route["rules"] = guard + list(rules)
     return config
 
 
@@ -1505,6 +1560,10 @@ def build_home_client_profile(home, device):
         raise ValueError("Home host is not set; fill in the public hostname or IP on the Home page first")
     reality = server["reality"]
     hy2 = server["hy2"]
+    # 仅内网设备的客户端连独立的 -lan 入站端口，网关按入站强制限内网。
+    device_lan_only = device.get("mode") == "lan_only"
+    reality_port = reality["lan_port"] if device_lan_only else reality["port"]
+    hy2_port = hy2["lan_port"] if device_lan_only else hy2["port"]
     lan_ip = home_gateway_lan_ip(home)
     if not lan_ip:
         raise ValueError("Gateway LAN IP is unknown; cannot build client profile")
@@ -1524,7 +1583,7 @@ def build_home_client_profile(home, device):
                 "type": "vless",
                 "tag": "home-vless",
                 "server": host,
-                "server_port": reality["port"],
+                "server_port": reality_port,
                 "uuid": device["uuid"],
                 "tls": {
                     "enabled": True,
@@ -1546,7 +1605,7 @@ def build_home_client_profile(home, device):
                 "type": "hysteria2",
                 "tag": "home-hy2",
                 "server": host,
-                "server_port": hy2["port"],
+                "server_port": hy2_port,
                 "password": device["hy2_password"],
                 "obfs": {"type": "salamander", "password": hy2["obfs_password"]},
                 "tls": {"enabled": True, "server_name": hy2["server_name"], "insecure": True, "alpn": ["h3"]},
@@ -1570,15 +1629,35 @@ def build_home_client_profile(home, device):
     # 作为 DNS transport 的 detour 目标会被判 "empty direct outbound" 而拒绝启动
     # （sing-box check 查不出来，实测踩过）。bootstrap DoH 正是 detour 到它。
     outbounds.append({"type": "direct", "tag": "direct", "connect_timeout": "15s"})
-    route_rules = [
-        {"inbound": "tun-in", "protocol": "dns", "action": "hijack-dns"},
-        {"port": [853, 784, 8853], "action": "reject"},
-    ]
+    lan_only = device.get("mode") == "lan_only"
+    bootstrap_server = {
+        "tag": "bootstrap",
+        "type": "https",
+        "server": "223.5.5.5",
+        "server_port": 443,
+        "path": "/dns-query",
+        "tls": {"server_name": "dns.alidns.com"},
+        "detour": "direct",
+    }
+    route_rules = [{"inbound": "tun-in", "protocol": "dns", "action": "hijack-dns"}]
+    if not lan_only:
+        # 全网模式才需要防加密 DNS 绕开网关 DNS；仅内网模式下 DNS 本来就走
+        # 用户自己的网络，不拦。
+        route_rules.append({"port": [853, 784, 8853], "action": "reject"})
     if lan_cidrs:
         route_rules.append({"ip_cidr": lan_cidrs, "outbound": "home-auto"})
-    return {
-        "log": {"level": "info", "timestamp": True},
-        "dns": {
+    if lan_only:
+        # 仅内网：只有内网段进隧道，其余（含 DNS）全走用户自己的网络；
+        # 网关侧另有按用户名的强制规则兜底，改配置也借不到代理出口。
+        dns_block = {
+            "servers": [bootstrap_server],
+            "rules": [{"domain": [host], "server": "bootstrap"}],
+            "final": "bootstrap",
+            "strategy": "prefer_ipv4",
+        }
+        route_final = "direct"
+    else:
+        dns_block = {
             "servers": [
                 {
                     "tag": "gw-dns",
@@ -1587,20 +1666,16 @@ def build_home_client_profile(home, device):
                     "server_port": 53,
                     "detour": "home-auto",
                 },
-                {
-                    "tag": "bootstrap",
-                    "type": "https",
-                    "server": "223.5.5.5",
-                    "server_port": 443,
-                    "path": "/dns-query",
-                    "tls": {"server_name": "dns.alidns.com"},
-                    "detour": "direct",
-                },
+                bootstrap_server,
             ],
             "rules": [{"domain": [host], "server": "bootstrap"}],
             "final": "gw-dns",
             "strategy": "prefer_ipv4",
-        },
+        }
+        route_final = "home-auto"
+    return {
+        "log": {"level": "info", "timestamp": True},
+        "dns": dns_block,
         "inbounds": [
             {
                 "type": "tun",
@@ -1614,7 +1689,7 @@ def build_home_client_profile(home, device):
         "outbounds": outbounds,
         "route": {
             "rules": route_rules,
-            "final": "home-auto",
+            "final": route_final,
             "auto_detect_interface": True,
             "default_domain_resolver": "bootstrap",
         },
@@ -1627,6 +1702,9 @@ def build_home_share_links(home, device):
     host = server["host"]
     reality = server["reality"]
     hy2 = server["hy2"]
+    device_lan_only = device.get("mode") == "lan_only"
+    reality_port = reality["lan_port"] if device_lan_only else reality["port"]
+    hy2_port = hy2["lan_port"] if device_lan_only else hy2["port"]
     name = quote(device["name"], safe="")
     links = {}
     if reality.get("enabled") and reality.get("public_key"):
@@ -1641,7 +1719,7 @@ def build_home_share_links(home, device):
         if reality["short_id"]:
             params.append(("sid", reality["short_id"][0]))
         query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params)
-        links["vless"] = f"vless://{device['uuid']}@{host}:{reality['port']}?{query}#{name}"
+        links["vless"] = f"vless://{device['uuid']}@{host}:{reality_port}?{query}#{name}"
     if hy2.get("enabled"):
         params = [
             ("sni", hy2["server_name"]),
@@ -1650,7 +1728,7 @@ def build_home_share_links(home, device):
             ("obfs-password", hy2["obfs_password"]),
         ]
         query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params)
-        links["hysteria2"] = f"hysteria2://{quote(device['hy2_password'], safe='')}@{host}:{hy2['port']}?{query}#{name}"
+        links["hysteria2"] = f"hysteria2://{quote(device['hy2_password'], safe='')}@{host}:{hy2_port}?{query}#{name}"
     return links
 
 
@@ -1665,6 +1743,7 @@ def home_public_view(home):
             "reality": {
                 "enabled": bool(server["reality"].get("enabled")),
                 "port": server["reality"]["port"],
+                "lanPort": server["reality"]["lan_port"],
                 "serverName": server["reality"]["server_name"],
                 "publicKey": server["reality"].get("public_key", ""),
                 "shortId": server["reality"]["short_id"],
@@ -1673,6 +1752,7 @@ def home_public_view(home):
             "hy2": {
                 "enabled": bool(server["hy2"].get("enabled")),
                 "port": server["hy2"]["port"],
+                "lanPort": server["hy2"]["lan_port"],
                 "serverName": server["hy2"]["server_name"],
             },
         },
@@ -1681,6 +1761,7 @@ def home_public_view(home):
                 "id": device["id"],
                 "name": device["name"],
                 "enabled": bool(device.get("enabled", True)),
+                "mode": device.get("mode") if device.get("mode") in ("full", "lan_only") else "full",
                 "createdAt": device.get("created_at", ""),
                 "uuidHint": (device["uuid"][:8] + "…") if device.get("uuid") else "",
                 "hasSubToken": bool(device.get("sub_token")),
@@ -1845,6 +1926,7 @@ def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=N
     ]
     config["outbounds"] = [proxy, auto, *node_outbounds, direct, block]
     apply_home_inbounds(config)
+    apply_home_route_rules(config)
     prune_managed_outbound_references(config, tags)
     return config
 
@@ -5554,6 +5636,7 @@ class Handler(BaseHTTPRequestHandler):
                         "hy2_password": secrets.token_urlsafe(32),
                         "sub_token": secrets.token_urlsafe(32),
                         "enabled": True,
+                        "mode": "full",
                         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                     home["devices"].append(device)
@@ -5590,6 +5673,25 @@ class Handler(BaseHTTPRequestHandler):
                     home_audit("device-toggle", f"name={device['name']} enabled={enabled}")
 
                 result = apply_home_change(toggle_device)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/devices/mode":
+                device_id = str(payload.get("id", "")).strip()
+                mode = str(payload.get("mode", "")).strip()
+                if mode not in ("full", "lan_only"):
+                    self.send_error_json("Invalid mode: use full or lan_only", 400)
+                    return
+
+                def set_device_mode(home):
+                    device = find_home_device(home, device_id)
+                    if device is None:
+                        raise ValueError("Device not found")
+                    device["mode"] = mode
+                    home_audit("device-mode", f"name={device['name']} mode={mode}")
+
+                # 模式决定网关渲染出的强制路由规则，必须走带重启的变更链路。
+                result = apply_home_change(set_device_mode)
                 status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
                 self.send_json(result, status)
                 return
@@ -5704,8 +5806,16 @@ class Handler(BaseHTTPRequestHandler):
                         if net not in cidrs:
                             cidrs.append(net)
                     updates["lan_cidrs"] = cidrs
+                # port_specs: (payload 键, 协议, 字段, 传输层)。lan_port 是仅内网
+                # 设备专用入站的端口，与主端口同传输层，二者不得相同。
+                port_specs = (
+                    ("realityPort", "reality", "port", "tcp"),
+                    ("hy2Port", "hy2", "port", "udp"),
+                    ("lanRealityPort", "reality", "lan_port", "tcp"),
+                    ("lanHy2Port", "hy2", "lan_port", "udp"),
+                )
                 new_ports = {}
-                for key, proto in (("realityPort", "reality"), ("hy2Port", "hy2")):
+                for key, proto, field_name, _transport in port_specs:
                     if key in payload:
                         try:
                             port = int(payload.get(key))
@@ -5715,8 +5825,15 @@ class Handler(BaseHTTPRequestHandler):
                         if not (1 <= port <= 65535):
                             self.send_error_json(f"Invalid {key}: out of range", 400)
                             return
-                        new_ports[proto] = port
+                        new_ports[(proto, field_name)] = port
                 if new_ports:
+                    # 同协议的主端口与 lan 端口不能相同（会双入站抢同一监听）。
+                    for proto in ("reality", "hy2"):
+                        eff_port = new_ports.get((proto, "port"), current[proto]["port"])
+                        eff_lan = new_ports.get((proto, "lan_port"), current[proto]["lan_port"])
+                        if eff_port == eff_lan:
+                            self.send_error_json(f"Invalid ports: {proto} port and lan port must differ", 400)
+                            return
                     # 与现有非回家入站的同传输层端口冲突时提前拒绝，避免重启才发现。
                     tcp_types = {"vless", "vmess", "trojan", "http", "mixed", "socks", "tproxy", "redirect", "dns", "shadowsocks", "naive", "anytls"}
                     udp_types = {"hysteria2", "tuic", "tproxy", "dns", "shadowsocks", "wireguard"}
@@ -5724,25 +5841,29 @@ class Handler(BaseHTTPRequestHandler):
                     taken = [
                         (int(inbound.get("listen_port") or 0), inbound.get("type", ""))
                         for inbound in rendered.get("inbounds", [])
-                        if inbound.get("tag") not in (HOME_REALITY_TAG, HOME_HY2_TAG) and inbound.get("listen_port")
+                        if inbound.get("tag") not in HOME_TAGS and inbound.get("listen_port")
                     ]
                     taken.append((int(os.environ.get("RULE_UI_PORT", "9091")), "rule-ui"))
-                    for proto, port in new_ports.items():
-                        capable = tcp_types if proto == "reality" else udp_types
+                    transport_of = {(proto, field_name): transport for _k, proto, field_name, transport in port_specs}
+                    for (proto, field_name), port in new_ports.items():
+                        capable = tcp_types if transport_of[(proto, field_name)] == "tcp" else udp_types
                         clash = [t for p, t in taken if p == port and (t == "rule-ui" or t in capable)]
                         if clash:
                             self.send_error_json(f"Port {port} is already used by {clash[0]} on this gateway", 400)
                             return
-                ports_changed = any(new_ports.get(proto) not in (None, current[proto]["port"]) for proto in new_ports)
+                ports_changed = any(
+                    new_ports.get((proto, field_name)) not in (None, current[proto][field_name])
+                    for proto, field_name in new_ports
+                )
 
                 def apply_settings(home):
                     server = home["server"]
                     for key in ("host", "lan_ip", "lan_cidrs"):
                         if key in updates:
                             server[key] = updates[key]
-                    for proto, port in new_ports.items():
-                        server[proto]["port"] = port
-                    home_audit("settings", f"host={server['host']} lan_ip={server['lan_ip'] or 'auto'} reality_port={server['reality']['port']} hy2_port={server['hy2']['port']}")
+                    for (proto, field_name), port in new_ports.items():
+                        server[proto][field_name] = port
+                    home_audit("settings", f"host={server['host']} lan_ip={server['lan_ip'] or 'auto'} reality_port={server['reality']['port']} hy2_port={server['hy2']['port']} reality_lan_port={server['reality']['lan_port']} hy2_lan_port={server['hy2']['lan_port']}")
 
                 # 改端口要重启 sing-box 让入站迁移；只改地址类变量不动运行配置。
                 result = apply_home_change(apply_settings, restart=ports_changed)
