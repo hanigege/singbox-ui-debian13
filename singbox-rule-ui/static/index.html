@@ -40,6 +40,7 @@
           <button class="tab" data-list="blacklist" type="button"></button>
           <button class="tab" data-list="greylist" type="button"></button>
           <button class="tab" data-list="ddns" type="button"></button>
+          <button class="tab" data-list="home" type="button"></button>
           <button class="tab" data-list="maintenance" type="button"></button>
         </nav>
 
@@ -271,6 +272,42 @@
           <div id="nodeRows" class="node-rows"></div>
         </section>
 
+        <section id="homeEditor" class="panel editor hidden">
+          <div class="editor-head">
+            <div>
+              <h2 id="homeTitle">Home access</h2>
+              <p id="homeSummary">Devices that can connect back home</p>
+            </div>
+            <div class="tools">
+              <button id="refreshHomeBtn" class="secondary-btn" type="button" data-i18n="refreshMaintenance">Refresh</button>
+            </div>
+          </div>
+          <section class="backup-panel" aria-label="Home server">
+            <div>
+              <h3 data-i18n="homeServerTitle">Home server</h3>
+              <p data-i18n="homeServerNote">Phones connect to these inbounds and then follow this gateway's routing and DNS, like on home WiFi.</p>
+            </div>
+            <div id="homeServerRows" class="home-server-rows"></div>
+          </section>
+          <section class="backup-panel" aria-label="Add device">
+            <div>
+              <h3 data-i18n="homeDevicesTitle">Devices</h3>
+              <p data-i18n="homeDevicesNote">One credential set per device. Revoke a lost phone here without affecting other devices.</p>
+            </div>
+            <form id="homeAddForm" class="backup-actions">
+              <input id="homeDeviceName" type="text" autocomplete="off" maxlength="64" data-i18n-placeholder="homeDeviceNamePlaceholder" placeholder="Device name, e.g. Jay's phone" />
+              <button id="homeAddBtn" type="submit" data-i18n="homeAddDevice">Add device</button>
+            </form>
+          </section>
+          <div id="homeDeviceRows" class="home-device-rows"></div>
+          <section class="backup-panel" aria-label="Home help">
+            <div>
+              <h3 data-i18n="homeHelpTitle">How to use</h3>
+              <p class="home-help" data-i18n="homeHelpBody">1) Install the sing-box app on the phone (Android: SFA; iPhone: sing-box MT, needs a non-mainland Apple account). 2) While on home WiFi, open Share for the device and scan the import QR code, or import the subscription URL. 3) Turn it on outside: all traffic goes home first, then follows the gateway rules. Turn off the phone's Private DNS / encrypted DNS, otherwise DNS may bypass home rules. Hotel/captive WiFi portals need the VPN off for the login page first.</p>
+            </div>
+          </section>
+        </section>
+
         <section id="maintenanceEditor" class="panel editor hidden">
           <div class="editor-head">
             <div>
@@ -354,6 +391,7 @@
         <button id="shareNodeClose" class="secondary-btn" type="button" aria-label="Close">×</button>
       </div>
       <p data-i18n="shareNodeNote">此链接包含节点凭据，请仅分享给可信的人。</p>
+      <div id="shareKindRow" class="share-kind-row hidden"></div>
       <img id="shareNodeQr" alt="Node share QR code" />
       <p id="shareQrMessage" role="status"></p>
       <label for="shareLinkInput" data-i18n="shareLink">分享链接</label>

@@ -200,6 +200,45 @@ const translations = {
     backupTitle: "Backup and restore",
     backupNote: "Export or restore the UI-managed rules, nodes, and routing settings.",
     changeTokenTitle: "Change access token",
+    homeServerTitle: "Home server",
+    homeServerNote: "Phones connect to these inbounds and then follow this gateway's routing and DNS, like on home WiFi.",
+    homeDevicesTitle: "Devices",
+    homeDevicesNote: "One credential set per device. Revoke a lost phone here without affecting other devices.",
+    homeDeviceNamePlaceholder: "Device name, e.g. Jay's phone",
+    homeAddDevice: "Add device",
+    homeHelpTitle: "How to use",
+    homeHelpBody: "1) Install the sing-box app on the phone (Android: SFA; iPhone: sing-box MT, needs a non-mainland Apple account). 2) While on home WiFi, open Share for the device and scan the import QR code, or import the subscription URL. 3) Turn it on outside: all traffic goes home first, then follows the gateway rules. Turn off the phone's Private DNS / encrypted DNS, otherwise DNS may bypass home rules. Hotel/captive WiFi portals need the VPN off for the login page first.",
+    homeHost: "Server",
+    homeHostPlaceholder: "Public hostname or IP, e.g. home.example.com",
+    homeHostSave: "Save address",
+    homeLanIp: "Gateway LAN IP",
+    homePort: "Port",
+    homeServerName: "SNI",
+    homePublicKey: "Reality public key",
+    homeOn: "On",
+    homeOff: "Off",
+    homeNoDevices: "No devices yet. Add one above.",
+    homeCreatedAt: "Created",
+    homeUuid: "UUID",
+    homeShare: "Share",
+    homeDownload: "Download JSON",
+    homeRotate: "Rotate credentials",
+    homeRotateSub: "Rotate subscription token",
+    homeRemove: "Remove",
+    homeEnableDevice: "Enable",
+    homeDisableDevice: "Disable",
+    homeConfirmRemove: "Remove this device? Its credentials stop working immediately.",
+    homeConfirmRotate: "Rotate credentials for this device? The phone must import the new profile afterwards.",
+    homeConfirmRotateSub: "Rotate the subscription token? The old subscription URL stops working; the phone keeps working until its next refresh.",
+    homeConfirmHy2On: "Enable the Hysteria2 home inbound? Make sure UDP port forwarding for the Hy2 port is set on the main router.",
+    homeConfirmRealityOff: "Disable the Reality home inbound? All devices lose the VLESS path (Hysteria2 still works if enabled).",
+    homeShareImport: "Import profile (recommended)",
+    homeShareSubUrl: "Subscription URL",
+    homeShareVless: "VLESS link",
+    homeShareHy2: "Hysteria2 link",
+    homeBusy: "Applying…",
+    homeApplied: "Home settings applied",
+    homeDevices: "devices",
     changeTokenNote: "Set a custom login token (at least 6 characters, no spaces).",
     changeToken: "Change token",
     newTokenPlaceholder: "New token",
@@ -383,6 +422,7 @@ const translations = {
       greylist: { title: "Greylist", note: "Forced proxy" },
       ddns: { title: "Local DDNS", note: "Local DNS and direct routing" },
       nodes: { title: "Nodes", note: "Add, delete, and enable outbounds" },
+      home: { title: "Home", note: "Devices that connect back home" },
       runtime: { title: "Runtime", note: "Connections, logs and active rules" },
       maintenance: { title: "Maintenance", note: "Rule-set updates and TProxy status" },
     },
@@ -595,6 +635,45 @@ const translations = {
     backupTitle: "备份与恢复",
     backupNote: "导出或恢复 UI 管理的规则、节点和分流设置。",
     changeTokenTitle: "修改访问密码",
+    homeServerTitle: "回家服务端",
+    homeServerNote: "手机连上这两个入站后，流量按本网关现有的分流与 DNS 规则走，跟在家连 WiFi 一样。",
+    homeDevicesTitle: "设备",
+    homeDevicesNote: "一台设备一套凭据。手机丢了在这里吊销那一台，不影响其他设备。",
+    homeDeviceNamePlaceholder: "设备名，例如：jay 的手机",
+    homeAddDevice: "添加设备",
+    homeHelpTitle: "使用方法",
+    homeHelpBody: "1）手机装 sing-box App（安卓 SFA；iPhone 用 sing-box MT，需要非大陆区 Apple 账号）。2）在家连 WiFi 时，点该设备的「分享」，扫导入二维码，或导入订阅 URL。3）在外面打开即用：全部流量先回家，再按网关规则走。请关掉手机的私人 DNS / 加密 DNS，否则 DNS 可能绕开家里分流。酒店等需要网页登录的 WiFi，先关掉 VPN 完成登录再开。",
+    homeHost: "服务器",
+    homeHostPlaceholder: "公网域名或 IP，如 home.example.com",
+    homeHostSave: "保存地址",
+    homeLanIp: "网关内网 IP",
+    homePort: "端口",
+    homeServerName: "SNI",
+    homePublicKey: "Reality 公钥",
+    homeOn: "已启用",
+    homeOff: "已停用",
+    homeNoDevices: "还没有设备，在上面添加一台。",
+    homeCreatedAt: "创建于",
+    homeUuid: "UUID",
+    homeShare: "分享",
+    homeDownload: "下载 JSON",
+    homeRotate: "轮换凭据",
+    homeRotateSub: "轮换订阅 token",
+    homeRemove: "删除",
+    homeEnableDevice: "启用",
+    homeDisableDevice: "停用",
+    homeConfirmRemove: "删除这台设备？它的凭据立即失效。",
+    homeConfirmRotate: "轮换这台设备的凭据？手机之后需要重新导入新配置。",
+    homeConfirmRotateSub: "轮换订阅 token？旧订阅 URL 立即失效；手机在下次刷新前仍可正常使用。",
+    homeConfirmHy2On: "启用 Hysteria2 回家入站？请确认主路由已做好该 UDP 端口的转发。",
+    homeConfirmRealityOff: "停用 Reality 回家入站？所有设备将失去 VLESS 通道（如已启用 Hysteria2 则不受影响）。",
+    homeShareImport: "导入配置（推荐）",
+    homeShareSubUrl: "订阅 URL",
+    homeShareVless: "VLESS 链接",
+    homeShareHy2: "Hysteria2 链接",
+    homeBusy: "正在应用…",
+    homeApplied: "回家设置已应用",
+    homeDevices: "台设备",
     changeTokenNote: "设置自定义登录密码（至少 6 位，不含空格）。",
     changeToken: "修改密码",
     newTokenPlaceholder: "新密码",
@@ -778,6 +857,7 @@ const translations = {
       greylist: { title: "灰名单", note: "强制代理" },
       ddns: { title: "本地 DDNS", note: "本地 DNS + 直连" },
       nodes: { title: "节点", note: "添加、删除、启停出站节点" },
+      home: { title: "回家", note: "在外连接回家的设备" },
       runtime: { title: "运行状态", note: "连接、日志与运行规则" },
       maintenance: { title: "维护", note: "规则集更新与 TProxy 状态" },
     },
@@ -795,6 +875,7 @@ let token = localStorage.getItem("ruleUiToken") || "";
 let lang = localStorage.getItem("ruleUiLang") || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
 let state = { lists: { whitelist: [], blacklist: [], greylist: [], ddns: [] }, nodes: [], groups: {}, meta: {} };
 let maintenance = {};
+let homeData = null;
 let runtime = { connections: [], rules: [], logLevel: "warn", logLines: [], logIdle: false };
 let runtimeProxy = { now: null, available: false };
 let delays = {};
@@ -1267,9 +1348,10 @@ function render() {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.list === active);
   });
-  $("ruleEditor").classList.toggle("hidden", active === "nodes" || active === "maintenance" || active === "runtime");
+  $("ruleEditor").classList.toggle("hidden", active === "nodes" || active === "maintenance" || active === "runtime" || active === "home");
   $("nodeEditor").classList.toggle("hidden", active !== "nodes");
   $("maintenanceEditor").classList.toggle("hidden", active !== "maintenance");
+  $("homeEditor").classList.toggle("hidden", active !== "home");
   $("runtimeEditor").classList.toggle("hidden", active !== "runtime");
   if (active === "runtime") {
     renderRuntime();
@@ -1278,6 +1360,11 @@ function render() {
   }
   if (active === "maintenance") {
     renderMaintenance();
+    updateButtons();
+    return;
+  }
+  if (active === "home") {
+    renderHome();
     updateButtons();
     return;
   }
@@ -3079,16 +3166,11 @@ async function copyShareLink() {
   setStatus(t("shareLinkCopied"), "ok");
 }
 
-async function openNodeShareDialog(outbound) {
-  const dialog = $("shareNodeDialog");
-  const link = shareNodeLink(outbound);
+async function loadShareQr(link) {
   const image = $("shareNodeQr");
   if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
   image.removeAttribute("src");
   $("shareQrMessage").textContent = t("shareQrLoading");
-  $("shareLinkInput").value = link;
-  $("shareNodeDialogTitle").textContent = `${t("shareNodeTitle")}: ${outbound.tag}`;
-  dialog.showModal();
   try {
     const response = await fetch("/api/share/qr", {
       method: "POST",
@@ -3105,6 +3187,228 @@ async function openNodeShareDialog(outbound) {
     $("shareQrMessage").textContent = "";
   } catch (error) {
     $("shareQrMessage").textContent = `${t("shareQrFailed")}: ${error.message}`;
+  }
+}
+
+// entries: [{label, link}]。多于一种时在弹窗顶部显示切换按钮（回家分享用：
+// 导入配置/订阅 URL/VLESS/Hysteria2 四种载荷共用一个二维码区）。
+function showShareDialog(title, entries) {
+  const dialog = $("shareNodeDialog");
+  $("shareNodeDialogTitle").textContent = title;
+  const kindRow = $("shareKindRow");
+  kindRow.innerHTML = "";
+  kindRow.classList.toggle("hidden", entries.length <= 1);
+  const select = (entry, button) => {
+    $("shareLinkInput").value = entry.link;
+    kindRow.querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
+    loadShareQr(entry.link);
+  };
+  entries.forEach((entry, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-btn";
+    button.textContent = entry.label;
+    button.addEventListener("click", () => select(entry, button));
+    kindRow.appendChild(button);
+    if (index === 0) select(entry, button);
+  });
+  if (!dialog.open) dialog.showModal();
+}
+
+async function openNodeShareDialog(outbound) {
+  showShareDialog(`${t("shareNodeTitle")}: ${outbound.tag}`, [{ label: "", link: shareNodeLink(outbound) }]);
+}
+
+// ---------------------------------------------------------------------------
+// 回家 tab：服务端状态卡 + 设备管理。所有变更都走后端 apply_home_change
+// （备份→渲染→校验→重启→回滚），前端只负责展示与二次确认。
+// ---------------------------------------------------------------------------
+
+async function refreshHome() {
+  try {
+    const body = await api("/api/home");
+    homeData = body.home;
+    if (active === "home") renderHome();
+  } catch (error) {
+    setStatus(error.message, "bad");
+  }
+}
+
+function homeServerItem(label, value) {
+  const row = document.createElement("div");
+  row.className = "maintenance-item";
+  const name = document.createElement("span");
+  name.textContent = label;
+  const detail = document.createElement("strong");
+  detail.textContent = value;
+  row.append(name, detail);
+  return row;
+}
+
+function renderHome() {
+  const info = translations[lang].lists.home;
+  $("homeTitle").textContent = info.title;
+  const serverBox = $("homeServerRows");
+  serverBox.innerHTML = "";
+  const deviceBox = $("homeDeviceRows");
+  deviceBox.innerHTML = "";
+  if (!homeData) {
+    $("homeSummary").textContent = t("loading");
+    return;
+  }
+  const server = homeData.server;
+  $("homeSummary").textContent = `${homeData.devices.length} ${t("homeDevices")} · ${info.note}`;
+  serverBox.append(
+    homeServerItem(t("homeHost"), server.host),
+    homeServerItem(t("homeLanIp"), server.lanIp),
+    homeServerItem(
+      `VLESS + Reality (${t("homePort")} ${server.reality.port}, ${t("homeServerName")} ${server.reality.serverName})`,
+      server.reality.enabled ? t("homeOn") : t("homeOff"),
+    ),
+    homeServerItem(
+      `Hysteria2 (${t("homePort")} ${server.hy2.port}, ${t("homeServerName")} ${server.hy2.serverName})`,
+      server.hy2.enabled ? t("homeOn") : t("homeOff"),
+    ),
+  );
+  const toggles = document.createElement("div");
+  toggles.className = "home-toggle-row";
+  const realityBtn = document.createElement("button");
+  realityBtn.type = "button";
+  realityBtn.className = "secondary-btn";
+  realityBtn.textContent = server.reality.enabled ? `${t("homeDisableDevice")} Reality` : `${t("homeEnableDevice")} Reality`;
+  realityBtn.addEventListener("click", () => toggleHomeProtocol("/api/home/server/reality", !server.reality.enabled, server.reality.enabled ? t("homeConfirmRealityOff") : ""));
+  const hy2Btn = document.createElement("button");
+  hy2Btn.type = "button";
+  hy2Btn.className = "secondary-btn";
+  hy2Btn.textContent = server.hy2.enabled ? `${t("homeDisableDevice")} Hysteria2` : `${t("homeEnableDevice")} Hysteria2`;
+  hy2Btn.addEventListener("click", () => toggleHomeProtocol("/api/home/server/hy2", !server.hy2.enabled, !server.hy2.enabled ? t("homeConfirmHy2On") : ""));
+  toggles.append(realityBtn, hy2Btn);
+  serverBox.appendChild(toggles);
+  const hostRow = document.createElement("div");
+  hostRow.className = "home-toggle-row";
+  const hostInput = document.createElement("input");
+  hostInput.type = "text";
+  hostInput.value = server.host || "";
+  hostInput.placeholder = t("homeHostPlaceholder");
+  hostInput.autocomplete = "off";
+  hostInput.maxLength = 253;
+  const hostBtn = document.createElement("button");
+  hostBtn.type = "button";
+  hostBtn.className = "secondary-btn";
+  hostBtn.textContent = t("homeHostSave");
+  hostBtn.addEventListener("click", () => homeDeviceAction("/api/home/server/host", { host: hostInput.value.trim() }));
+  hostRow.append(hostInput, hostBtn);
+  serverBox.appendChild(hostRow);
+
+  if (!homeData.devices.length) {
+    const empty = document.createElement("p");
+    empty.className = "setting-note";
+    empty.textContent = t("homeNoDevices");
+    deviceBox.appendChild(empty);
+    return;
+  }
+  homeData.devices.forEach((device) => {
+    const card = document.createElement("section");
+    card.className = "backup-panel home-device-card";
+    const head = document.createElement("div");
+    const title = document.createElement("h3");
+    title.textContent = device.name;
+    const meta = document.createElement("p");
+    meta.textContent = `${device.enabled ? t("homeOn") : t("homeOff")} · ${t("homeUuid")} ${device.uuidHint} · ${t("homeCreatedAt")} ${device.createdAt || "-"}`;
+    head.append(title, meta);
+    const actions = document.createElement("div");
+    actions.className = "backup-actions";
+    const shareBtn = document.createElement("button");
+    shareBtn.type = "button";
+    shareBtn.textContent = t("homeShare");
+    shareBtn.addEventListener("click", () => openHomeShareDialog(device));
+    const downloadBtn = document.createElement("button");
+    downloadBtn.type = "button";
+    downloadBtn.className = "secondary-btn";
+    downloadBtn.textContent = t("homeDownload");
+    downloadBtn.addEventListener("click", () => downloadHomeProfile(device));
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "secondary-btn";
+    toggleBtn.textContent = device.enabled ? t("homeDisableDevice") : t("homeEnableDevice");
+    toggleBtn.addEventListener("click", () => homeDeviceAction("/api/home/devices/toggle", { id: device.id, enabled: !device.enabled }));
+    const rotateBtn = document.createElement("button");
+    rotateBtn.type = "button";
+    rotateBtn.className = "secondary-btn";
+    rotateBtn.textContent = t("homeRotate");
+    rotateBtn.addEventListener("click", () => {
+      if (window.confirm(t("homeConfirmRotate"))) homeDeviceAction("/api/home/devices/rotate", { id: device.id });
+    });
+    const rotateSubBtn = document.createElement("button");
+    rotateSubBtn.type = "button";
+    rotateSubBtn.className = "secondary-btn";
+    rotateSubBtn.textContent = t("homeRotateSub");
+    rotateSubBtn.addEventListener("click", () => {
+      if (window.confirm(t("homeConfirmRotateSub"))) homeDeviceAction("/api/home/devices/rotate-sub", { id: device.id });
+    });
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "secondary-btn";
+    removeBtn.textContent = t("homeRemove");
+    removeBtn.addEventListener("click", () => {
+      if (window.confirm(t("homeConfirmRemove"))) homeDeviceAction("/api/home/devices/remove", { id: device.id });
+    });
+    actions.append(shareBtn, downloadBtn, toggleBtn, rotateBtn, rotateSubBtn, removeBtn);
+    card.append(head, actions);
+    deviceBox.appendChild(card);
+  });
+}
+
+async function homeDeviceAction(path, payload) {
+  setBusy(true);
+  setStatus(t("homeBusy"));
+  try {
+    const result = await api(path, { method: "POST", body: JSON.stringify(payload) });
+    if (result.home) homeData = result.home;
+    setStatus(t("homeApplied"), "ok");
+    renderHome();
+  } catch (error) {
+    setStatus(error.message, "bad");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function toggleHomeProtocol(path, enabled, confirmText) {
+  if (confirmText && !window.confirm(confirmText)) return;
+  await homeDeviceAction(path, { enabled });
+}
+
+async function openHomeShareDialog(device) {
+  try {
+    const body = await api("/api/home/share", { method: "POST", body: JSON.stringify({ id: device.id }) });
+    const entries = [];
+    if (body.deepLink) entries.push({ label: t("homeShareImport"), link: body.deepLink });
+    if (body.subUrl) entries.push({ label: t("homeShareSubUrl"), link: body.subUrl });
+    if (body.links?.vless) entries.push({ label: t("homeShareVless"), link: body.links.vless });
+    if (body.links?.hysteria2) entries.push({ label: t("homeShareHy2"), link: body.links.hysteria2 });
+    if (!entries.length) throw new Error("No shareable link available");
+    showShareDialog(`${t("homeShare")}: ${device.name}`, entries);
+  } catch (error) {
+    setStatus(error.message, "bad");
+  }
+}
+
+async function downloadHomeProfile(device) {
+  try {
+    const response = await fetch(`/api/home/profile?device=${encodeURIComponent(device.id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `home-${device.name}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    setStatus(error.message, "bad");
   }
 }
 
@@ -3779,11 +4083,20 @@ document.querySelectorAll(".tab").forEach((tab) => {
     setStatus(t("ready"));
     render();
     if (active === "maintenance") refreshMaintenance();
+    if (active === "home") refreshHome();
     if (active === "runtime") refreshRuntime();
   });
 });
 
 $("addForm").addEventListener("submit", addEntry);
+$("refreshHomeBtn").addEventListener("click", refreshHome);
+$("homeAddForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("homeDeviceName").value.trim();
+  if (!name) return;
+  await homeDeviceAction("/api/home/devices/add", { name });
+  $("homeDeviceName").value = "";
+});
 // 列表 textarea 输入实时解析：一行一个条目，更新 state 后标记 dirty
 $("listTextarea").addEventListener("input", onListTextareaInput);
 $("nodeForm").addEventListener("submit", addNode);

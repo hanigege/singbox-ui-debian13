@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 import ipaddress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -33,6 +34,16 @@ CLASH_API_SECRET = os.environ.get("RULE_UI_CLASH_API_SECRET", "")
 BASE_CONFIG_PATH = MANAGER_DIR / "base.json"
 NODES_PATH = MANAGER_DIR / "nodes.json"
 GROUPS_PATH = MANAGER_DIR / "groups.json"
+HOME_PATH = MANAGER_DIR / "home.json"
+HOME_AUDIT_PATH = MANAGER_DIR / "home-audit.log"
+HOME_HY2_CERT_DIR = Path(os.environ.get("RULE_UI_HOME_HY2_CERT_DIR", "/etc/sing-box/home-hy2"))
+HOME_REALITY_TAG = "vless-reality-home"
+HOME_HY2_TAG = "hy2-home"
+HOME_TAGS = (HOME_REALITY_TAG, HOME_HY2_TAG)
+HOME_DEFAULT_HOST = ""  # 公网地址没有通用默认：管理员在「回家」页填写自己的域名/IP
+HOME_DEFAULT_SERVER_NAME = "www.microsoft.com"
+# 2026-11-27 手工加在 base.json 里的 Reality 回家入站凭据文件；迁移导入时用它补 public_key（如果存在）。
+REALITY_CREDS_PATH = Path(os.environ.get("RULE_UI_REALITY_CREDS", "/root/reality-home-creds.json"))
 AUTO_PROXY_STATE_PATH = MANAGER_DIR / "auto-proxy-learning.json"
 AUTO_PROXY_RULE_SET_TAG = "auto-proxy-learned"
 AUTO_PROXY_RULE_SET_PATH = MANAGER_DIR / "auto-proxy-learned.json"
@@ -1023,6 +1034,9 @@ def ensure_manager_data():
     if not AUTO_PROXY_RULE_SET_PATH.exists():
         state = normalize_state(load_json(AUTO_PROXY_STATE_PATH, empty_state()))
         write_auto_proxy_rule_set(sorted(state["learned"]), AUTO_PROXY_RULE_SET_PATH)
+    if not HOME_PATH.exists():
+        # 触发一次回家入站收编检查（仅当 base.json 里有手工维护的回家入站时才落盘）。
+        load_home()
     if BASE_CONFIG_PATH.exists() and NODES_PATH.exists() and GROUPS_PATH.exists():
         return
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -1125,6 +1139,638 @@ def apply_routing_mark(outbound):
     return outbound
 
 
+# ---------------------------------------------------------------------------
+# 回家配置（home.json）：多设备 VLESS+Reality / Hysteria2 入站的数据源。
+#
+# 设计要点（2026-11-27 与 jay 拍板的方案）：
+# - home.json 是唯一数据源，只存网关本机（manager 目录，0600），绝不进 Git。
+# - render_config() 渲染时按 home.json 现场拼出两个回家入站，base.json 里同 tag
+#   的旧块会被剔除——这样 2026-11-27 手工写进 base.json 的单用户 Reality 入站
+#   可以被「收编」：首次 load_home() 时把它的 users/私钥/short_id 原值导入
+#   home.json（凭据一字不改，已有客户端零感知），之后由 home.json 接管。
+# - 客户端配置的设计原则：手机端只做 TUN 全量捕获并送回网关，分流/DNS 决策
+#   全部复用网关现有 route 表与 dns-in 规则（FakeIP 那套），不在手机端复制规则，
+#   避免两套规则漂移。DNS 经隧道直达网关 LAN 地址的 53 端口（以 dns-in 身份进入
+#   网关 DNS 引擎），bootstrap 解析只负责解析网关 DDNS 域名本身。
+# ---------------------------------------------------------------------------
+
+
+def _b64url_decode_nopad(text):
+    import base64
+
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def _b64url_encode_nopad(data):
+    import base64
+
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def x25519_public_from_private(private_b64):
+    """由 Reality 私钥（base64url 的 X25519 私钥）推导公钥。
+
+    sing-box 只在服务端配置里存私钥，生成客户端配置需要公钥。迁移导入时
+    creds 文件里有公钥就用文件的；没有就用这个纯 Python 实现推导
+    （Curve25519 标量乘，RFC 7748；已用 RFC 测试向量在开发期验证）。
+    """
+    key = bytearray(_b64url_decode_nopad(private_b64.strip()))
+    if len(key) != 32:
+        raise ValueError("Reality private key must be 32 bytes")
+    key[0] &= 248
+    key[31] &= 127
+    key[31] |= 64
+    scalar = int.from_bytes(key, "little")
+    p = 2**255 - 19
+    a24 = 121665
+    x1 = 9
+    x2, z2, x3, z3, swap = 1, 0, 9, 1, 0
+    for t in range(254, -1, -1):
+        bit = (scalar >> t) & 1
+        swap ^= bit
+        if swap:
+            x2, x3 = x3, x2
+            z2, z3 = z3, z2
+        swap = bit
+        a = (x2 + z2) % p
+        aa = a * a % p
+        b = (x2 - z2) % p
+        bb = b * b % p
+        e = (aa - bb) % p
+        c = (x3 + z3) % p
+        d = (x3 - z3) % p
+        da = d * a % p
+        cb = c * b % p
+        x3 = (da + cb) ** 2 % p
+        z3 = x1 * ((da - cb) ** 2 % p) % p
+        x2 = aa * bb % p
+        z2 = e * ((aa + a24 * e) % p) % p
+    if swap:
+        x2, x3 = x3, x2
+        z2, z3 = z3, z2
+    public = x2 * pow(z2, p - 2, p) % p
+    return _b64url_encode_nopad(public.to_bytes(32, "little"))
+
+
+def default_home_config():
+    return {
+        "version": 1,
+        "server": {
+            "host": HOME_DEFAULT_HOST,
+            "lan_ip": "",
+            "lan_cidrs": [],
+            "reality": {
+                "enabled": False,
+                "port": 8443,
+                "server_name": HOME_DEFAULT_SERVER_NAME,
+                "private_key": "",
+                "public_key": "",
+                "short_id": [],
+            },
+            "hy2": {
+                "enabled": False,
+                "port": 8443,
+                "server_name": HOME_DEFAULT_SERVER_NAME,
+                "obfs_password": "",
+                "cert_path": str(HOME_HY2_CERT_DIR / "cert.pem"),
+                "key_path": str(HOME_HY2_CERT_DIR / "key.pem"),
+            },
+        },
+        "devices": [],
+    }
+
+
+def normalize_home(data):
+    home = default_home_config()
+    if not isinstance(data, dict):
+        return home
+    server_in = data.get("server") or {}
+    if isinstance(server_in, dict):
+        home["server"]["host"] = str(server_in.get("host") or "").strip()
+        home["server"]["lan_ip"] = str(server_in.get("lan_ip") or "").strip()
+        cidrs = []
+        for raw in server_in.get("lan_cidrs") or []:
+            try:
+                net = ipaddress.ip_network(str(raw).strip(), strict=False)
+            except ValueError:
+                continue
+            text = str(net)
+            if text not in cidrs:
+                cidrs.append(text)
+        home["server"]["lan_cidrs"] = cidrs
+        for proto in ("reality", "hy2"):
+            incoming = server_in.get(proto) or {}
+            if not isinstance(incoming, dict):
+                continue
+            target = home["server"][proto]
+            for key in target:
+                if key in incoming and incoming[key] is not None:
+                    target[key] = incoming[key]
+            target["enabled"] = bool(target.get("enabled"))
+            try:
+                target["port"] = int(target.get("port") or 8443)
+            except (TypeError, ValueError):
+                target["port"] = 8443
+            if not (1 <= target["port"] <= 65535):
+                target["port"] = 8443
+        reality = home["server"]["reality"]
+        short_id = reality.get("short_id") or []
+        if isinstance(short_id, str):
+            short_id = [short_id]
+        reality["short_id"] = [str(item).strip() for item in short_id if str(item).strip()]
+    devices = []
+    for raw in data.get("devices") or []:
+        if not isinstance(raw, dict):
+            continue
+        device_id = str(raw.get("id") or "").strip()
+        uuid_value = str(raw.get("uuid") or "").strip()
+        if not device_id or not uuid_value:
+            continue
+        devices.append(
+            {
+                "id": device_id,
+                "name": str(raw.get("name") or device_id).strip() or device_id,
+                "uuid": uuid_value,
+                "hy2_password": str(raw.get("hy2_password") or "").strip(),
+                "sub_token": str(raw.get("sub_token") or "").strip(),
+                "enabled": bool(raw.get("enabled", True)),
+                "created_at": str(raw.get("created_at") or ""),
+            }
+        )
+    home["devices"] = devices
+    return home
+
+
+def migrate_home_from_base():
+    """把 base.json 里手工维护的 vless-reality-home 入站收编进 home.json。
+
+    只在 home.json 不存在时运行一次。users 的 uuid、私钥、short_id、SNI、
+    端口全部原值搬运，保证已有客户端（如助手自己的 Reality 通道）零感知。
+    公钥优先取 REALITY_CREDS_PATH 里的记录，取不到就由私钥推导。
+    """
+    home = default_home_config()
+    base = load_json(BASE_CONFIG_PATH, {})
+    inbound = None
+    for item in base.get("inbounds", []) or []:
+        if isinstance(item, dict) and item.get("tag") == HOME_REALITY_TAG:
+            inbound = item
+            break
+    if inbound is None:
+        return home
+    tls = inbound.get("tls") or {}
+    reality_tls = tls.get("reality") or {}
+    private_key = str(reality_tls.get("private_key") or "").strip()
+    reality = home["server"]["reality"]
+    reality["enabled"] = True
+    try:
+        reality["port"] = int(inbound.get("listen_port") or 8443)
+    except (TypeError, ValueError):
+        reality["port"] = 8443
+    reality["server_name"] = str(tls.get("server_name") or HOME_DEFAULT_SERVER_NAME)
+    reality["private_key"] = private_key
+    short_id = reality_tls.get("short_id") or []
+    if isinstance(short_id, str):
+        short_id = [short_id]
+    reality["short_id"] = [str(item) for item in short_id]
+    creds = load_json(REALITY_CREDS_PATH, {}) if REALITY_CREDS_PATH.exists() else {}
+    public_key = ""
+    if isinstance(creds, dict):
+        for key in ("public_key", "PublicKey", "publicKey", "pbk"):
+            if creds.get(key):
+                public_key = str(creds[key]).strip()
+                break
+    if not public_key and private_key:
+        try:
+            public_key = x25519_public_from_private(private_key)
+        except Exception:
+            public_key = ""
+    reality["public_key"] = public_key
+    devices = []
+    creds_uuid = ""
+    if isinstance(creds, dict):
+        creds_uuid = str(creds.get("uuid") or creds.get("UUID") or "").strip()
+    for index, user in enumerate(inbound.get("users") or []):
+        if not isinstance(user, dict) or not user.get("uuid"):
+            continue
+        uuid_value = str(user["uuid"]).strip()
+        name = str(user.get("name") or "").strip()
+        if not name:
+            name = "小小 (Muse)" if creds_uuid and uuid_value == creds_uuid else f"device-{index + 1}"
+        devices.append(
+            {
+                "id": "d_" + secrets.token_hex(6),
+                "name": name,
+                "uuid": uuid_value,
+                "hy2_password": secrets.token_urlsafe(32),
+                "sub_token": secrets.token_urlsafe(32),
+                "enabled": True,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+    home["devices"] = devices
+    return home
+
+
+def load_home():
+    if HOME_PATH.exists():
+        return normalize_home(load_json(HOME_PATH, {}))
+    home = migrate_home_from_base()
+    # 只有真的从 base.json 收编到了入站才落盘；全新安装保持无文件=无回家入站。
+    if home["server"]["reality"]["enabled"]:
+        write_json(HOME_PATH, home)
+        try:
+            HOME_PATH.chmod(0o600)
+        except OSError:
+            pass
+        home_audit("migrate", f"from base.json, devices={len(home['devices'])}")
+    return home
+
+
+def save_home(home):
+    write_json(HOME_PATH, home)
+    try:
+        HOME_PATH.chmod(0o600)
+    except OSError:
+        pass
+
+
+def home_audit(action, detail=""):
+    try:
+        MANAGER_DIR.mkdir(parents=True, exist_ok=True)
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {action} {detail}\n"
+        with HOME_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError:
+        pass
+
+
+def home_enabled_devices(home):
+    return [device for device in home["devices"] if device.get("enabled", True)]
+
+
+def build_home_inbounds(home):
+    devices = home_enabled_devices(home)
+    if not devices:
+        return []
+    server = home["server"]
+    inbounds = []
+    reality = server["reality"]
+    if reality.get("enabled") and reality.get("private_key"):
+        inbounds.append(
+            {
+                "type": "vless",
+                "tag": HOME_REALITY_TAG,
+                "listen": "::",
+                "listen_port": reality["port"],
+                "users": [{"name": device["name"], "uuid": device["uuid"]} for device in devices],
+                "tls": {
+                    "enabled": True,
+                    "server_name": reality["server_name"],
+                    "reality": {
+                        "enabled": True,
+                        "handshake": {"server": reality["server_name"], "server_port": 443},
+                        "private_key": reality["private_key"],
+                        "short_id": reality["short_id"],
+                    },
+                },
+            }
+        )
+    hy2 = server["hy2"]
+    if hy2.get("enabled") and hy2.get("obfs_password"):
+        inbound = {
+            "type": "hysteria2",
+            "tag": HOME_HY2_TAG,
+            "listen": "::",
+            "listen_port": hy2["port"],
+            "users": [
+                {"name": device["name"], "password": device["hy2_password"]}
+                for device in devices
+                if device.get("hy2_password")
+            ],
+            # 不设 up/down + ignore_client_bandwidth=true：全员走 BBR，
+            # 避免客户端自报带宽触发 Brutal 后在家庭宽带上抢占失控（稳定优先）。
+            "ignore_client_bandwidth": True,
+            "tls": {
+                "enabled": True,
+                "server_name": hy2["server_name"],
+                "alpn": ["h3"],
+                "certificate_path": hy2["cert_path"],
+                "key_path": hy2["key_path"],
+            },
+        }
+        if hy2.get("obfs_password"):
+            inbound["obfs"] = {"type": "salamander", "password": hy2["obfs_password"]}
+        if inbound["users"]:
+            inbounds.append(inbound)
+    return inbounds
+
+
+def apply_home_inbounds(config):
+    """渲染时注入回家入站：先剔除底稿里的同 tag 旧块，再按 home.json 拼装。
+
+    这样 base.json 里 2026-11-27 手工加的 Reality 块在迁移后不会与
+    home.json 生成的块重复出现（同 tag 双入站会让 sing-box 拒绝启动）。
+    """
+    inbounds = [
+        item
+        for item in config.get("inbounds", []) or []
+        if not (isinstance(item, dict) and item.get("tag") in HOME_TAGS)
+    ]
+    inbounds.extend(build_home_inbounds(load_home()))
+    config["inbounds"] = inbounds
+    return config
+
+
+def home_gateway_lan_ip(home):
+    lan_ip = str(home["server"].get("lan_ip") or "").strip()
+    if lan_ip:
+        return lan_ip
+    try:
+        return default_lan_ip()
+    except Exception:
+        return ""
+
+
+def build_home_client_profile(home, device):
+    """生成一台设备的完整 sing-box 客户端配置（手机 SFA/SFI、桌面 SFD 通用）。
+
+    原则见本节头部注释：TUN 全量捕获、final 走回家组、分流与 DNS 决策全在
+    网关侧。客户端本地只保留三条规则：DNS 劫持、封加密 DNS 的 853/784/8853
+    端口（防 DoT/DoQ 绕开网关 DNS）、内网段显式走回家（与 final 冗余，
+    防的是将来有人改 final 时内网先断）。
+    """
+    server = home["server"]
+    host = server["host"]
+    if not host:
+        raise ValueError("Home host is not set; fill in the public hostname or IP on the Home page first")
+    reality = server["reality"]
+    hy2 = server["hy2"]
+    lan_ip = home_gateway_lan_ip(home)
+    if not lan_ip:
+        raise ValueError("Gateway LAN IP is unknown; cannot build client profile")
+    lan_cidrs = []
+    try:
+        lan_cidrs.append(str(ipaddress.ip_network(f"{lan_ip}/24", strict=False)))
+    except ValueError:
+        pass
+    for extra in server.get("lan_cidrs") or []:
+        if extra not in lan_cidrs:
+            lan_cidrs.append(extra)
+    outbounds = []
+    auto_members = []
+    if reality.get("enabled") and reality.get("public_key"):
+        outbounds.append(
+            {
+                "type": "vless",
+                "tag": "home-vless",
+                "server": host,
+                "server_port": reality["port"],
+                "uuid": device["uuid"],
+                "tls": {
+                    "enabled": True,
+                    "server_name": reality["server_name"],
+                    "utls": {"enabled": True, "fingerprint": "chrome"},
+                    "reality": {
+                        "enabled": True,
+                        "public_key": reality["public_key"],
+                        "short_id": reality["short_id"][0] if reality["short_id"] else "",
+                    },
+                },
+                "domain_resolver": "bootstrap",
+            }
+        )
+        auto_members.append("home-vless")
+    if hy2.get("enabled"):
+        outbounds.append(
+            {
+                "type": "hysteria2",
+                "tag": "home-hy2",
+                "server": host,
+                "server_port": hy2["port"],
+                "password": device["hy2_password"],
+                "obfs": {"type": "salamander", "password": hy2["obfs_password"]},
+                "tls": {"enabled": True, "server_name": hy2["server_name"], "insecure": True, "alpn": ["h3"]},
+                "domain_resolver": "bootstrap",
+            }
+        )
+        auto_members.append("home-hy2")
+    if not auto_members:
+        raise ValueError("No home protocol is enabled for client profile")
+    outbounds.append(
+        {
+            "type": "urltest",
+            "tag": "home-auto",
+            "outbounds": auto_members,
+            "url": "https://cp.cloudflare.com/generate_204",
+            "interval": "3m",
+            "tolerance": 50,
+        }
+    )
+    # direct 必须带 connect_timeout：完全空的 direct 出站在 sing-box 1.14 里
+    # 作为 DNS transport 的 detour 目标会被判 "empty direct outbound" 而拒绝启动
+    # （sing-box check 查不出来，实测踩过）。bootstrap DoH 正是 detour 到它。
+    outbounds.append({"type": "direct", "tag": "direct", "connect_timeout": "15s"})
+    route_rules = [
+        {"inbound": "tun-in", "protocol": "dns", "action": "hijack-dns"},
+        {"port": [853, 784, 8853], "action": "reject"},
+    ]
+    if lan_cidrs:
+        route_rules.append({"ip_cidr": lan_cidrs, "outbound": "home-auto"})
+    return {
+        "log": {"level": "info", "timestamp": True},
+        "dns": {
+            "servers": [
+                {
+                    "tag": "gw-dns",
+                    "type": "udp",
+                    "server": lan_ip,
+                    "server_port": 53,
+                    "detour": "home-auto",
+                },
+                {
+                    "tag": "bootstrap",
+                    "type": "https",
+                    "server": "223.5.5.5",
+                    "server_port": 443,
+                    "path": "/dns-query",
+                    "tls": {"server_name": "dns.alidns.com"},
+                    "detour": "direct",
+                },
+            ],
+            "rules": [{"domain": [host], "server": "bootstrap"}],
+            "final": "gw-dns",
+            "strategy": "prefer_ipv4",
+        },
+        "inbounds": [
+            {
+                "type": "tun",
+                "tag": "tun-in",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "auto_route": True,
+                "strict_route": True,
+                "stack": "mixed",
+            }
+        ],
+        "outbounds": outbounds,
+        "route": {
+            "rules": route_rules,
+            "final": "home-auto",
+            "auto_detect_interface": True,
+            "default_domain_resolver": "bootstrap",
+        },
+        "experimental": {"cache_file": {"enabled": True}},
+    }
+
+
+def build_home_share_links(home, device):
+    server = home["server"]
+    host = server["host"]
+    reality = server["reality"]
+    hy2 = server["hy2"]
+    name = quote(device["name"], safe="")
+    links = {}
+    if reality.get("enabled") and reality.get("public_key"):
+        params = [
+            ("encryption", "none"),
+            ("security", "reality"),
+            ("sni", reality["server_name"]),
+            ("fp", "chrome"),
+            ("pbk", reality["public_key"]),
+            ("type", "tcp"),
+        ]
+        if reality["short_id"]:
+            params.append(("sid", reality["short_id"][0]))
+        query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params)
+        links["vless"] = f"vless://{device['uuid']}@{host}:{reality['port']}?{query}#{name}"
+    if hy2.get("enabled"):
+        params = [
+            ("sni", hy2["server_name"]),
+            ("insecure", "1"),
+            ("obfs", "salamander"),
+            ("obfs-password", hy2["obfs_password"]),
+        ]
+        query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params)
+        links["hysteria2"] = f"hysteria2://{quote(device['hy2_password'], safe='')}@{host}:{hy2['port']}?{query}#{name}"
+    return links
+
+
+def home_public_view(home):
+    server = home["server"]
+    return {
+        "server": {
+            "host": server["host"],
+            "lanIp": home_gateway_lan_ip(home),
+            "reality": {
+                "enabled": bool(server["reality"].get("enabled")),
+                "port": server["reality"]["port"],
+                "serverName": server["reality"]["server_name"],
+                "publicKey": server["reality"].get("public_key", ""),
+                "shortId": server["reality"]["short_id"],
+                "hasPrivateKey": bool(server["reality"].get("private_key")),
+            },
+            "hy2": {
+                "enabled": bool(server["hy2"].get("enabled")),
+                "port": server["hy2"]["port"],
+                "serverName": server["hy2"]["server_name"],
+            },
+        },
+        "devices": [
+            {
+                "id": device["id"],
+                "name": device["name"],
+                "enabled": bool(device.get("enabled", True)),
+                "createdAt": device.get("created_at", ""),
+                "uuidHint": (device["uuid"][:8] + "…") if device.get("uuid") else "",
+                "hasSubToken": bool(device.get("sub_token")),
+            }
+            for device in home["devices"]
+        ],
+    }
+
+
+def find_home_device(home, device_id):
+    for device in home["devices"]:
+        if device["id"] == device_id:
+            return device
+    return None
+
+
+def apply_home_change(mutator, restart=True):
+    """回家数据的统一变更链路（照 set_log_level 的范式）：
+
+    备份 home.json+config.json → 变更 → 落盘 home.json → render →
+    staged check → 落盘 config.json → 重启 → 失败全回滚。
+    restart=False 时只落盘 home.json（例如只轮换订阅 token，
+    服务端配置里根本没有它，不需要重启 sing-box）。
+    """
+    ensure_manager_data()
+    home = load_home()
+    mutator(home)
+    home = normalize_home(home)
+    if not restart:
+        save_home(home)
+        return {"ok": True, "restart": None, "home": home_public_view(home)}
+    previous_home = backup_manager_file(HOME_PATH)
+    previous_config = backup_manager_file(CONFIG_PATH)
+    save_home(home)
+    try:
+        config = render_config()
+        validate_outbound_references(config)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(MANAGER_DIR), prefix=".home-", suffix=".json", delete=False) as handle:
+            staged_path = Path(handle.name)
+            handle.write(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+        check = check_config(staged_path)
+        staged_path.unlink(missing_ok=True)
+        if check["code"] != 0:
+            restore_file(HOME_PATH, previous_home)
+            return {"ok": False, "error": "Config check failed. Home settings were not changed.", "check": check, "restart": None, "home": home_public_view(load_home())}
+        write_json(CONFIG_PATH, config)
+        restart_result = restart_sing_box()
+        if restart_result["code"] != 0 or service_status() != "active":
+            restore_file(HOME_PATH, previous_home)
+            restore_file(CONFIG_PATH, previous_config)
+            rollback_restart = restart_sing_box()
+            return {
+                "ok": False,
+                "error": "Restart failed. Previous home settings were restored.",
+                "check": check,
+                "restart": restart_result,
+                "rollback": {"restart": rollback_restart, "service": service_status()},
+                "home": home_public_view(load_home()),
+            }
+        return {"ok": True, "check": check, "restart": restart_result, "home": home_public_view(home)}
+    except Exception:
+        restore_file(HOME_PATH, previous_home)
+        restore_file(CONFIG_PATH, previous_config)
+        raise
+
+
+def ensure_home_hy2_cert(home):
+    """首次启用 Hy2 时生成自签证书（10 年），已存在则复用。"""
+    hy2 = home["server"]["hy2"]
+    cert_path = Path(hy2["cert_path"])
+    key_path = Path(hy2["key_path"])
+    if cert_path.exists() and key_path.exists():
+        return {"ok": True, "generated": False}
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    result = run_command(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(key_path), "-out", str(cert_path),
+            "-days", "3650", "-subj", f"/CN={hy2['server_name']}",
+        ],
+        timeout=30,
+    )
+    if result["code"] != 0:
+        return {"ok": False, "error": result["stderr"] or result["stdout"] or "openssl failed"}
+    try:
+        key_path.chmod(0o600)
+        cert_path.chmod(0o600)
+    except OSError:
+        pass
+    return {"ok": True, "generated": True}
+
+
 def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=None, auto_proxy_domains=None):
     ensure_manager_data()
     nodes = normalize_nodes(nodes if nodes is not None else load_nodes())
@@ -1196,6 +1842,7 @@ def render_config(nodes=None, groups=None, rule_dir=RULE_DIR, normalized_lists=N
         apply_routing_mark(dict(node["outbound"])) for node in nodes if node.get("enabled", True)
     ]
     config["outbounds"] = [proxy, auto, *node_outbounds, direct, block]
+    apply_home_inbounds(config)
     prune_managed_outbound_references(config, tags)
     return config
 
@@ -4053,6 +4700,7 @@ def apply_all(normalized_lists, nodes, groups):
         "config": backup_manager_file(CONFIG_PATH),
         "nodes": backup_manager_file(NODES_PATH),
         "groups": backup_manager_file(GROUPS_PATH),
+        "home": backup_manager_file(HOME_PATH),
     }
     saved = {
         name: {
@@ -4270,6 +4918,8 @@ def export_backup_payload():
         "lists": {name: read_entries(name) for name in LISTS},
         "nodes": load_nodes(),
         "groups": load_groups(),
+        # 回家数据（含全部设备凭据）随备份走；导出文件等同于全套钥匙，务必妥善保管。
+        "home": load_home(),
         "snapshots": {
             "config": load_json(CONFIG_PATH, {}) if CONFIG_PATH.exists() else {},
             "base": load_json(BASE_CONFIG_PATH, {}) if BASE_CONFIG_PATH.exists() else {},
@@ -4295,8 +4945,16 @@ def import_backup_payload(payload):
     normalized_lists = normalize_payload_lists(payload.get("lists", {}))
     nodes = normalize_nodes(payload.get("nodes", []))
     groups = normalize_payload_groups(payload.get("groups", {}), nodes=nodes)
+    # 回家数据先落盘再 staged_check，让校验覆盖导入的回家入站；
+    # 校验不过时把 home.json 恢复成导入前的状态，保持「未导入」语义完整。
+    previous_home_backup = None
+    if isinstance(payload.get("home"), dict):
+        previous_home_backup = backup_manager_file(HOME_PATH)
+        save_home(normalize_home(payload["home"]))
     check = staged_check(normalized_lists, nodes=nodes, groups=groups)
     if check["code"] != 0:
+        if previous_home_backup is not None:
+            restore_file(HOME_PATH, previous_home_backup)
         return {
             "ok": False,
             "error": "Config check failed. Backup was not imported; current config and running service were left unchanged.",
@@ -4338,6 +4996,7 @@ def rollback_apply(result):
     restore_file(CONFIG_PATH, backups.get("config"))
     restore_file(NODES_PATH, backups.get("nodes"))
     restore_file(GROUPS_PATH, backups.get("groups"))
+    restore_file(HOME_PATH, backups.get("home"))
     for item in ((result or {}).get("rules") or {}).values():
         if isinstance(item, dict):
             name = item.get("name")
@@ -4370,6 +5029,11 @@ def load_state():
         # 兜底出口跟随 base.json 的 route.final（默认 Proxy，可切 direct）；在「节点」页可改，
         # 改动走 /api/route/final 带 staged check + 回滚，不随 /api/save 一起提交。
         "baseConfig": {"routeFinal": load_json(BASE_CONFIG_PATH, {}).get("route", {}).get("final", "Proxy")},
+        "home": (lambda h: {
+            "realityEnabled": bool(h["server"]["reality"].get("enabled")),
+            "hy2Enabled": bool(h["server"]["hy2"].get("enabled")),
+            "devices": len(h["devices"]),
+        })(load_home()),
     }
 
 
@@ -4576,6 +5240,58 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"runtime": clash_runtime_snapshot(kind), "logLevel": current_log_level()})
                 return
             self.send_error_json("Not found", 404)
+            return
+        if parsed.path.startswith("/sub/"):
+            # 订阅端点：不走 UI token，用每台设备独立的 sub_token 鉴权。
+            # 只返回该设备自己的完整客户端配置；token 可单独轮换/随设备吊销失效。
+            sub_token = unquote(parsed.path[len("/sub/"):]).strip()
+            home = load_home()
+            device = None
+            if sub_token:
+                for candidate in home["devices"]:
+                    if candidate.get("sub_token") and secrets.compare_digest(candidate["sub_token"], sub_token):
+                        device = candidate
+                        break
+            if device is None or not device.get("enabled", True):
+                self.send_error_json("Not found", 404)
+                return
+            try:
+                profile = build_home_client_profile(home, device)
+            except ValueError as exc:
+                self.send_error_json(str(exc), 409)
+                return
+            home_audit("sub-fetch", f"device={device['name']}")
+            body = (json.dumps(profile, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed.path == "/api/home":
+            if not self.authorized():
+                self.send_error_json("Unauthorized", 401)
+                return
+            self.send_json({"home": home_public_view(load_home())})
+            return
+        if parsed.path == "/api/home/profile":
+            if not self.authorized():
+                self.send_error_json("Unauthorized", 401)
+                return
+            query = parse_qs(parsed.query)
+            device_id = (query.get("device") or [""])[0]
+            home = load_home()
+            device = find_home_device(home, device_id)
+            if device is None:
+                self.send_error_json("Device not found", 404)
+                return
+            try:
+                profile = build_home_client_profile(home, device)
+            except ValueError as exc:
+                self.send_error_json(str(exc), 409)
+                return
+            filename = f"home-{device['id']}.json"
+            self.send_download(filename, profile)
             return
         if parsed.path == "/api/token-hint":
             self.send_json({"message": "Use Authorization: Bearer <token> from the server token file."})
@@ -4818,6 +5534,172 @@ class Handler(BaseHTTPRequestHandler):
                 result = set_route_final(final)
                 status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
                 self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/devices/add":
+                name = str(payload.get("name", "")).strip()
+                if not name or len(name) > 64:
+                    self.send_error_json("Device name must be 1-64 characters", 400)
+                    return
+                created = {}
+
+                def add_device(home):
+                    if any(device["name"] == name for device in home["devices"]):
+                        raise ValueError(f"Device name already exists: {name}")
+                    device = {
+                        "id": "d_" + secrets.token_hex(6),
+                        "name": name,
+                        "uuid": str(uuid.uuid4()),
+                        "hy2_password": secrets.token_urlsafe(32),
+                        "sub_token": secrets.token_urlsafe(32),
+                        "enabled": True,
+                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    home["devices"].append(device)
+                    created.update(device)
+
+                result = apply_home_change(add_device)
+                home_audit("device-add", f"name={name}")
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json({**result, "deviceId": created.get("id")}, status)
+                return
+            if parsed.path == "/api/home/devices/remove":
+                device_id = str(payload.get("id", "")).strip()
+
+                def remove_device(home):
+                    device = find_home_device(home, device_id)
+                    if device is None:
+                        raise ValueError("Device not found")
+                    home["devices"] = [item for item in home["devices"] if item["id"] != device_id]
+                    home_audit("device-remove", f"name={device['name']}")
+
+                result = apply_home_change(remove_device)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/devices/toggle":
+                device_id = str(payload.get("id", "")).strip()
+                enabled = bool(payload.get("enabled", True))
+
+                def toggle_device(home):
+                    device = find_home_device(home, device_id)
+                    if device is None:
+                        raise ValueError("Device not found")
+                    device["enabled"] = enabled
+                    home_audit("device-toggle", f"name={device['name']} enabled={enabled}")
+
+                result = apply_home_change(toggle_device)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/devices/rotate":
+                device_id = str(payload.get("id", "")).strip()
+
+                def rotate_device(home):
+                    device = find_home_device(home, device_id)
+                    if device is None:
+                        raise ValueError("Device not found")
+                    device["uuid"] = str(uuid.uuid4())
+                    device["hy2_password"] = secrets.token_urlsafe(32)
+                    device["sub_token"] = secrets.token_urlsafe(32)
+                    home_audit("device-rotate", f"name={device['name']}")
+
+                result = apply_home_change(rotate_device)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/devices/rotate-sub":
+                device_id = str(payload.get("id", "")).strip()
+
+                def rotate_sub(home):
+                    device = find_home_device(home, device_id)
+                    if device is None:
+                        raise ValueError("Device not found")
+                    device["sub_token"] = secrets.token_urlsafe(32)
+                    home_audit("device-rotate-sub", f"name={device['name']}")
+
+                # 订阅 token 不在服务端配置里，轮换不需要重启 sing-box。
+                result = apply_home_change(rotate_sub, restart=False)
+                self.send_json(result, 200 if result["ok"] else 500)
+                return
+            if parsed.path == "/api/home/share":
+                device_id = str(payload.get("id", "")).strip()
+                home = load_home()
+                device = find_home_device(home, device_id)
+                if device is None:
+                    self.send_error_json("Device not found", 404)
+                    return
+                host_header = self.headers.get("Host", "")
+                sub_url = f"http://{host_header}/sub/{device['sub_token']}" if host_header and device.get("sub_token") else ""
+                deep_link = ""
+                if sub_url:
+                    deep_link = "sing-box://import-remote-profile?url=" + quote(sub_url, safe="") + "#" + quote(device["name"], safe="")
+                self.send_json(
+                    {
+                        "links": build_home_share_links(home, device),
+                        "subUrl": sub_url,
+                        "deepLink": deep_link,
+                    }
+                )
+                return
+            if parsed.path == "/api/home/server/reality":
+                enabled = bool(payload.get("enabled", False))
+
+                def toggle_reality(home):
+                    reality = home["server"]["reality"]
+                    if enabled and not reality.get("private_key"):
+                        # 全新安装首次启用：在本机生成密钥对，私钥只落 home.json。
+                        generated = run_command(["/usr/local/bin/sing-box", "generate", "reality-keypair"], timeout=15)
+                        if generated["code"] != 0:
+                            raise ValueError("sing-box generate reality-keypair failed")
+                        keys = {}
+                        for line in generated["stdout"].splitlines():
+                            if ":" in line:
+                                key, value = line.split(":", 1)
+                                keys[key.strip()] = value.strip()
+                        if not keys.get("PrivateKey") or not keys.get("PublicKey"):
+                            raise ValueError("Unexpected reality-keypair output")
+                        reality["private_key"] = keys["PrivateKey"]
+                        reality["public_key"] = keys["PublicKey"]
+                        reality["short_id"] = [secrets.token_hex(4)]
+                    reality["enabled"] = enabled
+                    home_audit("reality-toggle", f"enabled={enabled}")
+
+                result = apply_home_change(toggle_reality)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/server/host":
+                host = str(payload.get("host") or "").strip().rstrip(".")
+                if not host or len(host) > 253 or not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", host) or ".." in host:
+                    self.send_error_json("Invalid host: use a public hostname or IP address", 400)
+                    return
+
+                def set_host(home):
+                    home["server"]["host"] = host
+                    home_audit("host-set", host)
+
+                # 公网地址只影响客户端配置与分享链接，不改网关入站，无需重启 sing-box。
+                result = apply_home_change(set_host, restart=False)
+                self.send_json(result, 200 if result["ok"] else 500)
+                return
+            if parsed.path == "/api/home/server/hy2":
+                enabled = bool(payload.get("enabled", False))
+                cert_result = {}
+
+                def toggle_hy2(home):
+                    hy2 = home["server"]["hy2"]
+                    if enabled:
+                        if not hy2.get("obfs_password"):
+                            hy2["obfs_password"] = secrets.token_urlsafe(32)
+                        cert_result.update(ensure_home_hy2_cert(home))
+                        if not cert_result.get("ok"):
+                            raise ValueError(f"Hy2 certificate generation failed: {cert_result.get('error')}")
+                    hy2["enabled"] = enabled
+                    home_audit("hy2-toggle", f"enabled={enabled}")
+
+                result = apply_home_change(toggle_hy2)
+                status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
+                self.send_json({**result, "cert": cert_result}, status)
                 return
             if parsed.path == "/api/token/change":
                 # 修改 UI 访问密码：do_POST 顶部已做 Bearer 鉴权，这里只需校验并落盘新值。

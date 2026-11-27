@@ -3018,3 +3018,12 @@ body::before {
     width: 100%;
   }
 }
+
+/* 回家 tab */
+.home-server-rows { display: flex; flex-direction: column; gap: 6px; min-width: min(420px, 100%); }
+.home-toggle-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.home-device-rows { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.home-device-card { margin: 0; }
+.home-help { white-space: pre-line; line-height: 1.6; }
+.share-kind-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.share-kind-row button.active { outline: 2px solid var(--hatch-widget-accent, #4c8dff); }
