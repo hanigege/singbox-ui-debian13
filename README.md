@@ -96,7 +96,7 @@ Debian 13 VM 或裸机启用（网关与服务端命令相同）：
 curl -fsSL https://raw.githubusercontent.com/hanigege/singbox-ui-debian13/main/scripts/enable-tcp-brutal.sh | bash
 ```
 
-脚本固定上游 v1.0.3 的 DKMS 源码包，地址与 SHA256 同时固定在 `versions.json` 的 `tcp_brutal` 段，下载后先验校验和再编译；经 DKMS 为当前内核编译、安装并设置开机自动加载，重复执行不会重复安装。**内核升级后 brutal 消失的坑**：DKMS 为新内核重编模块需要新内核的头文件，而 Debian 默认不会随新内核自动装头文件——缺了它模块编不出来，重启进新内核后 brutal 静默失效（UI 里仍显示已启用）。脚本会一并安装跟随最新内核的头文件元包（`linux-headers-<架构>`）堵住这个坑，已装过的机器重跑一次脚本即可补上。若重启后发现 `sysctl net.ipv4.tcp_available_congestion_control` 里没有 brutal，先看 `dkms status`，重跑一遍本脚本即可自愈。容器 / LXC 环境会停止并提示在宿主机安装，因为模块归宿主机内核管理。
+脚本固定上游 v1.0.3 的 DKMS 源码包，地址与 SHA256 同时固定在 `versions.json` 的 `tcp_brutal` 段，下载后先验校验和再编译；经 DKMS 为当前内核编译、安装并设置开机自动加载，重复执行不会重复安装。**内核升级后 brutal 消失的坑**：DKMS 为新内核重编模块需要新内核的头文件，而 Debian 默认不会随新内核自动装头文件——缺了它模块编不出来，重启进新内核后 brutal 静默失效（UI 里仍显示已启用）。脚本会一并安装跟随最新内核的头文件元包（按内核 flavor 选 `linux-headers-<架构>` 或 `linux-headers-cloud-<架构>`）堵住这个坑，已装过的机器重跑一次脚本即可补上。若重启后发现 `sysctl net.ipv4.tcp_available_congestion_control` 里没有 brutal，先看 `dkms status`，重跑一遍本脚本即可自愈。容器 / LXC 环境会停止并提示在宿主机安装，因为模块归宿主机内核管理。
 
 所在网络无法直连 GitHub 时，与一键安装一样加下载前缀，把命令换成：
 

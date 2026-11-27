@@ -30,6 +30,13 @@ case "$container" in
     ;;
 esac
 
+# 头文件元包按运行内核的 flavor 选：cloud 内核（VPS 常见）要用 -cloud 元包，
+# 只按架构选会拿到标准内核那份，新内核照样没头文件、DKMS 编不了。
+case "$(uname -r)" in
+  *-cloud-*) headers_meta="linux-headers-cloud-$(dpkg --print-architecture)" ;;
+  *) headers_meta="linux-headers-$(dpkg --print-architecture)" ;;
+esac
+
 brutal_available() {
   available=$(sysctl -n net.ipv4.tcp_available_congestion_control)
   case " $available " in
@@ -41,7 +48,6 @@ brutal_available() {
 if brutal_available; then
   echo '当前内核已提供 brutal，无需重复安装。'
   # 已装机器也要补头文件元包，否则内核升级后 DKMS 无头文件可编，brutal 会在重启后静默失效。
-  headers_meta="linux-headers-$(dpkg --print-architecture)"
   if ! dpkg-query -W -f='${Status}' "$headers_meta" 2>/dev/null | grep -q 'install ok installed'; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
@@ -53,7 +59,7 @@ else
   apt-get update
   # dkms 会带入编译工具链；内核头必须与正在运行的内核版本一致，
   # 并装跟随最新内核的头文件元包：没有它，内核升级后新内核没头文件，DKMS 无法重编、brutal 会静默失效。
-  apt-get install -y --no-install-recommends ca-certificates curl dkms "linux-headers-$(uname -r)" "linux-headers-$(dpkg --print-architecture)"
+  apt-get install -y --no-install-recommends ca-certificates curl dkms "linux-headers-$(uname -r)" "$headers_meta"
 
   brutal_tmp=$(mktemp -d)
   trap 'rm -rf "$brutal_tmp"' EXIT HUP INT TERM
