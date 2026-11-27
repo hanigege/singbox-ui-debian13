@@ -264,6 +264,27 @@ check("POST host valid -> 200", status == 200, f"{status}")
 check("host persisted", app.load_home()["server"]["host"] == "home2.example.com")
 status, _ = http_post("/api/home/server/host", {"host": "bad host!"})
 check("POST host invalid -> 400", status == 400, f"{status}")
+
+status, _ = http_post("/api/home/server/settings", {"realityPort": 18443, "hy2Port": 18444, "lanIp": "192.168.99.6", "lanCidrs": "192.168.100.0/24, 192.168.200.0/24"})
+check("POST settings valid -> 200", status == 200, f"{status}")
+saved = app.load_home()["server"]
+check("settings persisted (ports/lanIp/cidrs)",
+      saved["reality"]["port"] == 18443 and saved["hy2"]["port"] == 18444
+      and saved["lan_ip"] == "192.168.99.6" and saved["lan_cidrs"] == ["192.168.100.0/24", "192.168.200.0/24"],
+      str({k: saved[k] for k in ("lan_ip", "lan_cidrs")}))
+rendered5 = app.render_config()
+ports5 = {i["tag"]: i["listen_port"] for i in rendered5["inbounds"] if i.get("tag") in ("vless-reality-home", "hy2-home")}
+check("rendered inbounds follow new ports", ports5 == {"vless-reality-home": 18443, "hy2-home": 18444}, str(ports5))
+status, _ = http_post("/api/home/server/settings", {"realityPort": 9091})
+check("POST settings port conflict with rule-ui -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"hy2Port": 0})
+check("POST settings port 0 -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"lanIp": "999.1.1.1"})
+check("POST settings bad lanIp -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"lanCidrs": "10.0.0.0/33"})
+check("POST settings bad CIDR -> 400", status == 400, f"{status}")
+status, _ = http_post("/api/home/server/settings", {"realityPort": 8443, "hy2Port": 8443, "lanIp": ""})
+check("POST settings restore defaults -> 200", status == 200, f"{status}")
 server.shutdown()
 
 print("\nRESULT:", "ALL PASS" if not fails else f"{len(fails)} FAILURES: {fails}")

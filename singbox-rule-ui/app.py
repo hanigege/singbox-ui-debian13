@@ -1660,6 +1660,8 @@ def home_public_view(home):
         "server": {
             "host": server["host"],
             "lanIp": home_gateway_lan_ip(home),
+            "lanIpStored": bool(server.get("lan_ip")),
+            "lanCidrs": list(server.get("lan_cidrs") or []),
             "reality": {
                 "enabled": bool(server["reality"].get("enabled")),
                 "port": server["reality"]["port"],
@@ -5667,6 +5669,84 @@ class Handler(BaseHTTPRequestHandler):
                 result = apply_home_change(toggle_reality)
                 status = 200 if result["ok"] else 422 if result.get("check", {}).get("code") != 0 else 500
                 self.send_json(result, status)
+                return
+            if parsed.path == "/api/home/server/settings":
+                # 每台机器的网络环境不同：公网地址、内网 IP、两个协议的端口都做成
+                # 页面可填的变量（默认值 host 空、lanIp 自动检测、端口 8443/8443）。
+                current = load_home()["server"]
+                updates = {}
+                if "host" in payload:
+                    host = str(payload.get("host") or "").strip().rstrip(".")
+                    if not host or len(host) > 253 or not re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", host) or ".." in host:
+                        self.send_error_json("Invalid host: use a public hostname or IP address", 400)
+                        return
+                    updates["host"] = host
+                if "lanIp" in payload:
+                    lan_ip = str(payload.get("lanIp") or "").strip()
+                    if lan_ip:
+                        try:
+                            lan_ip = str(ipaddress.IPv4Address(lan_ip))
+                        except ValueError:
+                            self.send_error_json("Invalid lanIp: use an IPv4 address or leave empty for auto-detect", 400)
+                            return
+                    updates["lan_ip"] = lan_ip
+                if "lanCidrs" in payload:
+                    raw_cidrs = payload.get("lanCidrs")
+                    if isinstance(raw_cidrs, str):
+                        raw_cidrs = [part for part in re.split(r"[,\s]+", raw_cidrs) if part]
+                    cidrs = []
+                    for raw in raw_cidrs or []:
+                        try:
+                            net = str(ipaddress.ip_network(str(raw).strip(), strict=False))
+                        except ValueError:
+                            self.send_error_json(f"Invalid CIDR: {raw}", 400)
+                            return
+                        if net not in cidrs:
+                            cidrs.append(net)
+                    updates["lan_cidrs"] = cidrs
+                new_ports = {}
+                for key, proto in (("realityPort", "reality"), ("hy2Port", "hy2")):
+                    if key in payload:
+                        try:
+                            port = int(payload.get(key))
+                        except (TypeError, ValueError):
+                            self.send_error_json(f"Invalid {key}", 400)
+                            return
+                        if not (1 <= port <= 65535):
+                            self.send_error_json(f"Invalid {key}: out of range", 400)
+                            return
+                        new_ports[proto] = port
+                if new_ports:
+                    # 与现有非回家入站的同传输层端口冲突时提前拒绝，避免重启才发现。
+                    tcp_types = {"vless", "vmess", "trojan", "http", "mixed", "socks", "tproxy", "redirect", "dns", "shadowsocks", "naive", "anytls"}
+                    udp_types = {"hysteria2", "tuic", "tproxy", "dns", "shadowsocks", "wireguard"}
+                    rendered = render_config()
+                    taken = [
+                        (int(inbound.get("listen_port") or 0), inbound.get("type", ""))
+                        for inbound in rendered.get("inbounds", [])
+                        if inbound.get("tag") not in (HOME_REALITY_TAG, HOME_HY2_TAG) and inbound.get("listen_port")
+                    ]
+                    taken.append((int(os.environ.get("RULE_UI_PORT", "9091")), "rule-ui"))
+                    for proto, port in new_ports.items():
+                        capable = tcp_types if proto == "reality" else udp_types
+                        clash = [t for p, t in taken if p == port and (t == "rule-ui" or t in capable)]
+                        if clash:
+                            self.send_error_json(f"Port {port} is already used by {clash[0]} on this gateway", 400)
+                            return
+                ports_changed = any(new_ports.get(proto) not in (None, current[proto]["port"]) for proto in new_ports)
+
+                def apply_settings(home):
+                    server = home["server"]
+                    for key in ("host", "lan_ip", "lan_cidrs"):
+                        if key in updates:
+                            server[key] = updates[key]
+                    for proto, port in new_ports.items():
+                        server[proto]["port"] = port
+                    home_audit("settings", f"host={server['host']} lan_ip={server['lan_ip'] or 'auto'} reality_port={server['reality']['port']} hy2_port={server['hy2']['port']}")
+
+                # 改端口要重启 sing-box 让入站迁移；只改地址类变量不动运行配置。
+                result = apply_home_change(apply_settings, restart=ports_changed)
+                self.send_json(result, 200 if result["ok"] else 500)
                 return
             if parsed.path == "/api/home/server/host":
                 host = str(payload.get("host") or "").strip().rstrip(".")

@@ -3022,6 +3022,9 @@ body::before {
 /* 回家 tab */
 .home-server-rows { display: flex; flex-direction: column; gap: 6px; min-width: min(420px, 100%); }
 .home-toggle-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.home-settings-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.home-settings-field { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; }
+.home-settings-field input { width: 100%; }
 .home-device-rows { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .home-device-card { margin: 0; }
 .home-help { white-space: pre-line; line-height: 1.6; }

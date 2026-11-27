@@ -211,6 +211,13 @@ const translations = {
     homeHost: "Server",
     homeHostPlaceholder: "Public hostname or IP, e.g. home.example.com",
     homeHostSave: "Save address",
+    homeSettingsSave: "Save settings",
+    homeSettingsNote: "Every network differs: fill in your own public address (DDNS domain), LAN IP and ports. After changing a port, update the matching forwarding rule on your main router: TCP to the Reality port, UDP to the Hy2 port, both to this gateway.",
+    homeLanIpAuto: "Auto-detect (now: ",
+    homeLanCidrs: "Extra LAN ranges",
+    homeLanCidrsPlaceholder: "Comma separated, e.g. 192.168.2.0/24",
+    homeRealityPort: "Reality port (TCP)",
+    homeHy2Port: "Hy2 port (UDP)",
     homeLanIp: "Gateway LAN IP",
     homePort: "Port",
     homeServerName: "SNI",
@@ -646,6 +653,13 @@ const translations = {
     homeHost: "服务器",
     homeHostPlaceholder: "公网域名或 IP，如 home.example.com",
     homeHostSave: "保存地址",
+    homeSettingsSave: "保存设置",
+    homeSettingsNote: "每台机器的网络环境不同：公网地址（DDNS 域名）、内网 IP 和端口都按你自己的网络填。改过端口后，记得去主路由同步转发规则：TCP 转发到 Reality 端口、UDP 转发到 Hy2 端口，目标都是本网关。",
+    homeLanIpAuto: "留空自动检测（当前：",
+    homeLanCidrs: "额外内网段",
+    homeLanCidrsPlaceholder: "逗号分隔，如 192.168.2.0/24",
+    homeRealityPort: "Reality 端口（TCP）",
+    homeHy2Port: "Hy2 端口（UDP）",
     homeLanIp: "网关内网 IP",
     homePort: "端口",
     homeServerName: "SNI",
@@ -3284,21 +3298,57 @@ function renderHome() {
   hy2Btn.addEventListener("click", () => toggleHomeProtocol("/api/home/server/hy2", !server.hy2.enabled, !server.hy2.enabled ? t("homeConfirmHy2On") : ""));
   toggles.append(realityBtn, hy2Btn);
   serverBox.appendChild(toggles);
-  const hostRow = document.createElement("div");
-  hostRow.className = "home-toggle-row";
-  const hostInput = document.createElement("input");
-  hostInput.type = "text";
-  hostInput.value = server.host || "";
-  hostInput.placeholder = t("homeHostPlaceholder");
-  hostInput.autocomplete = "off";
-  hostInput.maxLength = 253;
-  const hostBtn = document.createElement("button");
-  hostBtn.type = "button";
-  hostBtn.className = "secondary-btn";
-  hostBtn.textContent = t("homeHostSave");
-  hostBtn.addEventListener("click", () => homeDeviceAction("/api/home/server/host", { host: hostInput.value.trim() }));
-  hostRow.append(hostInput, hostBtn);
-  serverBox.appendChild(hostRow);
+  const form = document.createElement("div");
+  form.className = "home-settings-form";
+  const field = (labelText, input) => {
+    const wrap = document.createElement("label");
+    wrap.className = "home-settings-field";
+    const span = document.createElement("span");
+    span.textContent = labelText;
+    wrap.append(span, input);
+    return wrap;
+  };
+  const textInput = (value, placeholder, maxLength) => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = value || "";
+    input.placeholder = placeholder || "";
+    input.autocomplete = "off";
+    if (maxLength) input.maxLength = maxLength;
+    return input;
+  };
+  const hostInput = textInput(server.host, t("homeHostPlaceholder"), 253);
+  const lanIpInput = textInput(server.lanIpStored ? server.lanIp : "", server.lanIpStored ? "" : `${t("homeLanIpAuto")}${server.lanIp})`, 45);
+  const realityPortInput = textInput(String(server.reality.port), "8443", 5);
+  realityPortInput.inputMode = "numeric";
+  const hy2PortInput = textInput(String(server.hy2.port), "8443", 5);
+  hy2PortInput.inputMode = "numeric";
+  const lanCidrsInput = textInput((server.lanCidrs || []).join(", "), t("homeLanCidrsPlaceholder"), 256);
+  form.append(
+    field(t("homeHost"), hostInput),
+    field(t("homeLanIp"), lanIpInput),
+    field(t("homeRealityPort"), realityPortInput),
+    field(t("homeHy2Port"), hy2PortInput),
+    field(t("homeLanCidrs"), lanCidrsInput),
+  );
+  const saveRow = document.createElement("div");
+  saveRow.className = "home-toggle-row";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = t("homeSettingsSave");
+  saveBtn.addEventListener("click", () => homeDeviceAction("/api/home/server/settings", {
+    host: hostInput.value.trim(),
+    lanIp: lanIpInput.value.trim(),
+    lanCidrs: lanCidrsInput.value.trim(),
+    realityPort: Number(realityPortInput.value),
+    hy2Port: Number(hy2PortInput.value),
+  }));
+  saveRow.append(saveBtn);
+  const note = document.createElement("p");
+  note.className = "setting-note";
+  note.textContent = t("homeSettingsNote");
+  form.append(saveRow, note);
+  serverBox.appendChild(form);
 
   if (!homeData.devices.length) {
     const empty = document.createElement("p");
