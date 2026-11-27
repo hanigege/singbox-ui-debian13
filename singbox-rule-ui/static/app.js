@@ -3335,6 +3335,7 @@ function renderHome() {
   saveRow.className = "home-toggle-row";
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
+  saveBtn.className = "secondary-btn";
   saveBtn.textContent = t("homeSettingsSave");
   saveBtn.addEventListener("click", () => homeDeviceAction("/api/home/server/settings", {
     host: hostInput.value.trim(),
@@ -3370,6 +3371,7 @@ function renderHome() {
     actions.className = "backup-actions";
     const shareBtn = document.createElement("button");
     shareBtn.type = "button";
+    shareBtn.className = "secondary-btn";
     shareBtn.textContent = t("homeShare");
     shareBtn.addEventListener("click", () => openHomeShareDialog(device));
     const downloadBtn = document.createElement("button");
