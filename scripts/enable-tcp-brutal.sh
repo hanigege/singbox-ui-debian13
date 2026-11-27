@@ -40,11 +40,20 @@ brutal_available() {
 
 if brutal_available; then
   echo '当前内核已提供 brutal，无需重复安装。'
+  # 已装机器也要补头文件元包，否则内核升级后 DKMS 无头文件可编，brutal 会在重启后静默失效。
+  headers_meta="linux-headers-$(dpkg --print-architecture)"
+  if ! dpkg-query -W -f='${Status}' "$headers_meta" 2>/dev/null | grep -q 'install ok installed'; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends "$headers_meta"
+    echo "已补装 $headers_meta，后续内核升级会自动带上头文件。"
+  fi
 else
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  # dkms 会带入编译工具链；内核头必须与正在运行的内核版本一致。
-  apt-get install -y --no-install-recommends ca-certificates curl dkms "linux-headers-$(uname -r)"
+  # dkms 会带入编译工具链；内核头必须与正在运行的内核版本一致，
+  # 并装跟随最新内核的头文件元包：没有它，内核升级后新内核没头文件，DKMS 无法重编、brutal 会静默失效。
+  apt-get install -y --no-install-recommends ca-certificates curl dkms "linux-headers-$(uname -r)" "linux-headers-$(dpkg --print-architecture)"
 
   brutal_tmp=$(mktemp -d)
   trap 'rm -rf "$brutal_tmp"' EXIT HUP INT TERM
@@ -65,7 +74,7 @@ else
   fi
 fi
 
-# 开机自动加载；DKMS 会在内核升级后自动为新内核重编模块。
+# 开机自动加载；内核升级后 DKMS 为新内核重编模块，前提是新内核头文件到位（脚本安装的头文件元包保证这一点）。
 brutal_load_tmp=$(mktemp)
 printf '%s\n' brutal > "$brutal_load_tmp"
 install -m 0644 "$brutal_load_tmp" /etc/modules-load.d/brutal.conf
