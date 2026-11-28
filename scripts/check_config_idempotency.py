@@ -24,8 +24,6 @@ def load_app(workdir):
     app.NODES_PATH = app.MANAGER_DIR / "nodes.json"
     app.GROUPS_PATH = app.MANAGER_DIR / "groups.json"
     app.BACKUP_DIR = app.MANAGER_DIR / "backups"
-    app.AUTO_PROXY_STATE_PATH = app.MANAGER_DIR / "auto-proxy-learning.json"
-    app.AUTO_PROXY_RULE_SET_PATH = app.MANAGER_DIR / "auto-proxy-learned.json"
     app.TOKEN_FILE = workdir / "rule-ui" / "token"
     # 本测试只验证渲染幂等性；固定运行态监听信息，避免依赖测试机是否有 Linux ip 命令。
     app.default_lan_ip = lambda: "192.0.2.6"

@@ -21,8 +21,6 @@ jobs:
       - run: python scripts/check_config_idempotency.py
       - run: python scripts/test_greylist_fakeip.py
       - run: python scripts/test_backup_import_job.py
-      - run: python scripts/test_auto_proxy_learning.py
-      - run: python scripts/test_auto_proxy_watch.py
   native-binary:
     name: native-binary (${{ matrix.arch }})
     strategy:
@@ -62,4 +60,3 @@ jobs:
           sudo mkdir -p /usr/local/lib/sing-box
           sudo install -m 0644 "$RUNNER_TEMP/sing-box/libcronet.so" /usr/local/lib/sing-box/libcronet.so
           sing-box version
-          python scripts/test_auto_proxy_watch.py

@@ -13,7 +13,6 @@ tar -czf "$TARGET" \
   etc/sing-box/manager/base.json \
   etc/sing-box/manager/groups.json \
   etc/sing-box/manager/nodes.json \
-  etc/sing-box/manager/auto-proxy-learning.json \
   etc/sing-box/config.json
 chmod 600 "$TARGET"
 

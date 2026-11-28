@@ -169,18 +169,13 @@ Rule UI 的「回家」页让手机/电脑在外网时经本机网关回家：�
 - **不要把 Rule UI 的 9091 端口转发到公网**；订阅地址只在可信局域网使用。
 - 自检脚本：`SING_BOX_BIN=/path/to/sing-box python3 scripts/test_home_feature.py`。
 
-## HTTPS 自动学习
-
-国内分类默认直连并使用本地 DNS。自动学习监控从实际直连的 TCP/443 连接中发现可见域名；连续两次 direct HTTPS 探测失败、当前 Proxy 探测成功后，才加入现有的自动学习规则集。学习规则优先于国内直连规则，白名单、DDNS、黑名单、灰名单和测速直连设置保持优先。
-
-监控与原错误日志学习器共用互斥锁，学习开关和已学习列表仍在 Rule UI 管理。每个域名探测后冷却 15 分钟，等待中的域名队列最多 128 个。已有规则通过 sing-box 校验后热更新，不重启主服务；首次遇到故障的连接仍可能失败，后续连接自动使用代理。域名被 ECH 隐藏或仅有 IP 的流量无法通过 SNI 学习。
 
 ## 日常维护
 
 ```bash
 sing-box-gateway-info
 sing-box check -c /etc/sing-box/config.json
-systemctl status sing-box sing-box-tproxy singbox-rule-ui sing-box-auto-proxy-watch
+systemctl status sing-box sing-box-tproxy singbox-rule-ui
 journalctl -u singbox-rule-ui -u sing-box -e
 tail -n 100 /var/log/sing-box-gateway/sing-box.log
 systemctl list-timers '*sing-box*'
