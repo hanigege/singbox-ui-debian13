@@ -1087,7 +1087,28 @@ def load_nodes():
 
 def load_auto_proxy_state():
     ensure_manager_data()
-    return normalize_state(load_json(AUTO_PROXY_STATE_PATH, empty_state()))
+    try:
+        return normalize_state(load_json(AUTO_PROXY_STATE_PATH, empty_state()))
+    except (ValueError, TypeError):
+        # 状态文件损坏/格式不对时绝不把渲染与状态接口打死：已学名单在规则集文件里
+        # 有一份完整副本，按它重建（学习时间以规则集文件时间近似）；学习进程下一次
+        # 落盘就会把状态文件写回正常格式。规则集也读不出来才回空状态。
+        learned = {}
+        try:
+            rule_set = load_json(AUTO_PROXY_RULE_SET_PATH, {})
+            mtime = int(AUTO_PROXY_RULE_SET_PATH.stat().st_mtime)
+            if isinstance(rule_set, dict) and mtime:
+                for rule in rule_set.get("rules", []):
+                    if isinstance(rule, dict):
+                        for raw in rule.get("domain", []):
+                            domain = normalize_domain(str(raw))
+                            if domain:
+                                learned[domain] = {"learnedAt": mtime, "expiresAt": 0}
+        except (ValueError, TypeError, OSError):
+            learned = {}
+        state = empty_state()
+        state["learned"] = learned
+        return state
 
 
 def load_auto_proxy_domains(state=None):
@@ -4127,6 +4148,10 @@ def auto_proxy_learning_summary():
         "enabled": state["enabled"],
         "learnedCount": len(state["learned"]),
         "learnedDomains": sorted(state["learned"]),
+        "learnedDetails": [
+            {"domain": domain, "learnedAt": state["learned"][domain].get("learnedAt", 0)}
+            for domain in sorted(state["learned"])
+        ],
         "candidateCount": len(state["candidates"]),
     }
 

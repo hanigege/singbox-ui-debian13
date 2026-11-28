@@ -1161,6 +1161,12 @@ button[data-i18n="updateRules"] {
   gap: 12px;
 }
 
+.auto-proxy-domain-row .learned-at {
+  color: var(--muted);
+  font-size: 12px;
+  margin-right: auto;
+}
+
 .auto-proxy-learning-actions {
   display: flex;
   justify-content: flex-end;

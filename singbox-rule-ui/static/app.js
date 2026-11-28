@@ -1738,18 +1738,30 @@ function renderAutoProxyLearningDetails(learning = {}) {
   if (!learnedDomains.length) {
     body.appendChild(renderMaintenanceItem(t("autoProxyLearnedDomains"), t("autoProxyNoDomains")));
   }
+  const learnedAtByDomain = new Map(
+    (Array.isArray(learning.learnedDetails) ? learning.learnedDetails : []).map((item) => [item.domain, item.learnedAt])
+  );
   for (const domain of learnedDomains) {
     const row = document.createElement("div");
     row.className = "maintenance-item auto-proxy-domain-row";
     const value = document.createElement("strong");
     value.textContent = domain;
+    const learnedAt = learnedAtByDomain.get(domain);
+    let when = null;
+    if (learnedAt) {
+      when = document.createElement("span");
+      when.className = "learned-at";
+      const date = new Date(learnedAt * 1000);
+      const pad = (n) => String(n).padStart(2, "0");
+      when.textContent = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "secondary-btn";
     remove.textContent = t("autoProxyDeleteDomain");
     remove.setAttribute("aria-label", `${t("autoProxyDeleteDomain")} ${domain}`);
     remove.addEventListener("click", () => removeAutoProxyDomain(domain));
-    row.append(value, remove);
+    row.append(...(when ? [value, when, remove] : [value, remove]));
     body.appendChild(row);
   }
   if (learnedDomains.length) {

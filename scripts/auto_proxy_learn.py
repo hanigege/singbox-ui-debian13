@@ -94,7 +94,18 @@ def run_tick(dry_run=False):
                 if app.is_manually_handled(domain, lists):
                     next_state = discard_candidate(next_state, domain)
                     continue
-                result = app.test_node_delay(tag, url=f"https://{domain}/", timeout_ms=PROBE_TIMEOUT_MS)
+                url = f"https://{domain}/"
+                # 日志里的失败可能只是瞬时故障（网站重启/限流）且事后已恢复：
+                # 学之前先复探两次直连（与监视通道同口径），直连已通就清掉候选、不学，
+                # 避免把早已恢复的域名永久送去代理。
+                direct_ok = app.test_node_delay("direct", url=url, timeout_ms=PROBE_TIMEOUT_MS)["ok"]
+                if not direct_ok:
+                    direct_ok = app.test_node_delay("direct", url=url, timeout_ms=PROBE_TIMEOUT_MS)["ok"]
+                if direct_ok:
+                    next_state = discard_candidate(next_state, domain)
+                    probed.append({"domain": domain, "directOk": True})
+                    continue
+                result = app.test_node_delay(tag, url=url, timeout_ms=PROBE_TIMEOUT_MS)
                 next_state = record_probe(next_state, domain, now, bool(result["ok"]))
                 probed.append({"domain": domain, "ok": bool(result["ok"]), "delayMs": result["delay"]})
 
