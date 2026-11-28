@@ -212,6 +212,15 @@ const translations = {
     homeHostPlaceholder: "Public hostname or IP, e.g. home.example.com",
     homeHostSave: "Save address",
     homeSettingsSave: "Save settings",
+    homeSettingsSaving: "Saving…",
+    homeSettingsSaved: "Settings saved.",
+    homeSettingsSavedRestart: "Settings saved. sing-box restarted and the new ports are live — remember to update the matching forwarding rules on your main router.",
+    homeSettingsFailedPrefix: "Save failed: ",
+    homeValPort: "must be an integer between 1 and 65535",
+    homeValPortSame: "The main and LAN-only ports of the same protocol must differ",
+    homeValHost: "The public address is not valid.",
+    homeValLanIp: "The LAN IP is not valid.",
+    homeValCidr: "Invalid extra LAN range: ",
     homeSettingsNote: "Every network differs: fill in your own public address (DDNS domain), LAN IP and ports. After changing a port, update the matching forwarding rule on your main router: TCP to the Reality port, UDP to the Hy2 port, both to this gateway. LAN-only devices use their own pair of ports, so forward those two as well (TCP + UDP) if you use LAN-only mode.",
     homeLanIpAuto: "Auto-detect (now: ",
     homeLanCidrs: "Extra LAN ranges",
@@ -661,6 +670,15 @@ const translations = {
     homeHostPlaceholder: "公网域名或 IP，如 home.example.com",
     homeHostSave: "保存地址",
     homeSettingsSave: "保存设置",
+    homeSettingsSaving: "保存中…",
+    homeSettingsSaved: "设置已保存。",
+    homeSettingsSavedRestart: "设置已保存，sing-box 已重启、新端口已生效 — 记得去主路由同步转发规则。",
+    homeSettingsFailedPrefix: "保存失败：",
+    homeValPort: "请填 1–65535 的整数",
+    homeValPortSame: "同一协议的主端口与仅内网端口不能相同",
+    homeValHost: "公网地址格式不对。",
+    homeValLanIp: "内网 IP 格式不对。",
+    homeValCidr: "额外内网段格式不对：",
     homeSettingsNote: "每台机器的网络环境不同：公网地址（DDNS 域名）、内网 IP 和端口都按你自己的网络填。改过端口后，记得去主路由同步转发规则：TCP 转发到 Reality 端口、UDP 转发到 Hy2 端口，目标都是本网关。仅内网设备走自己的一对端口，用到仅内网模式时，这两个端口（TCP+UDP）也要一并转发。",
     homeLanIpAuto: "留空自动检测（当前：",
     homeLanCidrs: "额外内网段",
@@ -904,6 +922,9 @@ let lang = localStorage.getItem("ruleUiLang") || ((navigator.language || "").toL
 let state = { lists: { whitelist: [], blacklist: [], greylist: [], ddns: [] }, nodes: [], groups: {}, meta: {} };
 let maintenance = {};
 let homeData = null;
+// 回家服务器设置的保存反馈（成功/失败文案），renderHome 重建表单时据此回填
+// 表单下方的内联状态行——反馈必须出现在按钮旁边，顶栏状态离表单太远看不见。
+let homeSettingsFeedback = null;
 let runtime = { connections: [], rules: [], logLevel: "warn", logLines: [], logIdle: false };
 let runtimeProxy = { now: null, available: false };
 let delays = {};
@@ -3365,20 +3386,33 @@ function renderHome() {
   saveBtn.type = "button";
   saveBtn.className = "secondary-btn";
   saveBtn.textContent = t("homeSettingsSave");
-  saveBtn.addEventListener("click", () => homeDeviceAction("/api/home/server/settings", {
-    host: hostInput.value.trim(),
-    lanIp: lanIpInput.value.trim(),
-    lanCidrs: lanCidrsInput.value.trim(),
-    realityPort: Number(realityPortInput.value),
-    hy2Port: Number(hy2PortInput.value),
-    lanRealityPort: Number(lanRealityPortInput.value),
-    lanHy2Port: Number(lanHy2PortInput.value),
-  }));
+  // 保存反馈行：紧挨按钮显示保存中/成功/失败，顶栏状态离表单太远、
+  // 用户滚到表单时看不见，等于没有反馈（2026-11-28 实测报障）。
+  const settingsStatus = document.createElement("p");
+  settingsStatus.className = "home-settings-status";
+  settingsStatus.setAttribute("role", "status");
+  if (homeSettingsFeedback) {
+    settingsStatus.textContent = homeSettingsFeedback.text;
+    settingsStatus.classList.add(homeSettingsFeedback.tone);
+  }
+  const settingsRefs = { hostInput, lanIpInput, lanCidrsInput, realityPortInput, hy2PortInput, lanRealityPortInput, lanHy2PortInput, saveBtn, settingsStatus };
+  saveBtn.addEventListener("click", () => saveHomeSettings(settingsRefs));
+  // 改动任意字段后清掉旧的成功提示和高亮，避免拿着过期反馈继续改。
+  [hostInput, lanIpInput, lanCidrsInput, realityPortInput, hy2PortInput, lanRealityPortInput, lanHy2PortInput].forEach((input) => {
+    input.addEventListener("input", () => {
+      input.classList.remove("field-error");
+      if (homeSettingsFeedback) {
+        homeSettingsFeedback = null;
+        settingsStatus.textContent = "";
+        settingsStatus.className = "home-settings-status";
+      }
+    });
+  });
   saveRow.append(saveBtn);
   const note = document.createElement("p");
   note.className = "setting-note";
   note.textContent = t("homeSettingsNote");
-  form.append(saveRow, note);
+  form.append(saveRow, settingsStatus, note);
   serverBox.appendChild(form);
 
   if (!homeData.devices.length) {
@@ -3449,6 +3483,82 @@ function renderHome() {
     card.append(head, actions);
     deviceBox.appendChild(card);
   });
+}
+
+async function saveHomeSettings(refs) {
+  const { hostInput, lanIpInput, lanCidrsInput, realityPortInput, hy2PortInput, lanRealityPortInput, lanHy2PortInput, saveBtn, settingsStatus } = refs;
+  const showFeedback = (tone, text) => {
+    homeSettingsFeedback = { tone, text };
+    settingsStatus.textContent = text;
+    settingsStatus.className = `home-settings-status ${tone}`;
+  };
+  const failField = (input, text) => {
+    input.classList.add("field-error");
+    showFeedback("bad", text);
+    input.focus();
+  };
+  // 前端先校验：能判的错误直接指出是哪个字段，不发请求、不等后端。
+  const host = hostInput.value.trim();
+  if (!host || host.length > 253 || !/^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) || host.includes("..")) {
+    failField(hostInput, t("homeValHost"));
+    return;
+  }
+  const lanIp = lanIpInput.value.trim();
+  if (lanIp && !/^\d{1,3}(\.\d{1,3}){3}$/.test(lanIp)) {
+    failField(lanIpInput, t("homeValLanIp"));
+    return;
+  }
+  const portSpecs = [
+    [realityPortInput, "realityPort", t("homeRealityPort")],
+    [hy2PortInput, "hy2Port", t("homeHy2Port")],
+    [lanRealityPortInput, "lanRealityPort", t("homeLanRealityPort")],
+    [lanHy2PortInput, "lanHy2Port", t("homeLanHy2Port")],
+  ];
+  const payload = { host, lanIp, lanCidrs: lanCidrsInput.value.trim() };
+  for (const [input, key, label] of portSpecs) {
+    const raw = input.value.trim();
+    const value = Number(raw);
+    if (!raw || !Number.isInteger(value) || value < 1 || value > 65535) {
+      failField(input, `${label} ${t("homeValPort")}`);
+      return;
+    }
+    payload[key] = value;
+  }
+  if (payload.realityPort === payload.lanRealityPort) {
+    failField(lanRealityPortInput, t("homeValPortSame"));
+    return;
+  }
+  if (payload.hy2Port === payload.lanHy2Port) {
+    failField(lanHy2PortInput, t("homeValPortSame"));
+    return;
+  }
+  for (const item of payload.lanCidrs.split(",").map((part) => part.trim()).filter(Boolean)) {
+    if (item.includes(".") && !/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(item)) {
+      failField(lanCidrsInput, `${t("homeValCidr")}${item}`);
+      return;
+    }
+  }
+  saveBtn.disabled = true;
+  settingsStatus.textContent = t("homeSettingsSaving");
+  settingsStatus.className = "home-settings-status";
+  setBusy(true);
+  setStatus(t("homeBusy"));
+  try {
+    const result = await api("/api/home/server/settings", { method: "POST", body: JSON.stringify(payload) });
+    if (result.home) homeData = result.home;
+    // 改了端口时后端会重启 sing-box，成功文案要把这件事说清。
+    const text = result.restart ? t("homeSettingsSavedRestart") : t("homeSettingsSaved");
+    homeSettingsFeedback = { tone: "ok", text };
+    setStatus(text, "ok");
+    renderHome();
+  } catch (error) {
+    // 后端失败：把后端给的原因原样显示在按钮旁，不静默。
+    showFeedback("bad", `${t("homeSettingsFailedPrefix")}${error.message}`);
+    setStatus(error.message, "bad");
+    saveBtn.disabled = false;
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function homeDeviceAction(path, payload) {

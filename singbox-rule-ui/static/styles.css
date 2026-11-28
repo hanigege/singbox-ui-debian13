@@ -3025,6 +3025,10 @@ body::before {
 .home-settings-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .home-settings-field { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; }
 .home-settings-field input { width: 100%; }
+.home-settings-status { margin: 0; min-height: 1.25em; font-size: 0.9em; }
+.home-settings-status.ok { color: var(--ok); }
+.home-settings-status.bad { color: #e5534b; }
+.home-settings-field input.field-error { border-color: #e5534b; outline: 1px solid #e5534b; }
 .home-device-rows { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .home-device-card { margin: 0; }
 .home-help { white-space: pre-line; line-height: 1.6; }
