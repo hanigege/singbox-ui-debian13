@@ -370,10 +370,14 @@ const translations = {
     routeFinalDirectWarn: "Switch fallback route to direct? Unmatched traffic will go direct: domestic sites are unaffected, but some foreign domains may fail to open. Continue?",
     routeFinalApplied: "Fallback route switched to",
     localDnsTitle: "China DNS",
-    localDnsNote: "Choose one local-dns upstream. sing-box does not run these in parallel.",
+    localDnsNote: "Upstreams for direct China domains, served by a local DNS forwarder: presets or up to 5 custom servers, queried in parallel (fastest wins). Custom changes apply instantly, no sing-box restart.",
     localDnsUpstream: "Upstream",
     customDnsServer: "Custom Server",
     customDnsPort: "Custom Port",
+    customDnsAdd: "+ Add server",
+    customDnsRemove: "Remove",
+    localDnsForwarder: "Local forwarder",
+    dnsHotApplied: "Saved. DNS changes applied instantly (no restart).",
     refreshDnsDelay: "Refresh DNS delay",
     dnsDelayUpdated: "DNS delay updated",
     dnsDelayEmpty: "DNS delay has not been tested",
@@ -828,10 +832,14 @@ const translations = {
     routeFinalDirectWarn: "确认把兜底出口切换为 direct？未匹配规则的流量将直连：国内网站完全正常使用，但部分国外域名可能会打不开。是否继续？",
     routeFinalApplied: "兜底出口已切换为",
     localDnsTitle: "国内 DNS",
-    localDnsNote: "为国内直连域名选择一个 local-dns 上游；sing-box 不会并发查询这些 DNS。",
+    localDnsNote: "国内直连域名的上游，经本机转发层生效：可选预设，或自定义最多 5 个、并发查询取最快；自定义修改立即生效，不用重启 sing-box。",
     localDnsUpstream: "上游",
     customDnsServer: "自定义服务器",
     customDnsPort: "自定义端口",
+    customDnsAdd: "+ 添加服务器",
+    customDnsRemove: "删除",
+    localDnsForwarder: "本机转发",
+    dnsHotApplied: "已保存，DNS 修改已热生效（未重启 sing-box）。",
     refreshDnsDelay: "刷新 DNS 延时",
     dnsDelayUpdated: "DNS 延时已更新",
     dnsDelayEmpty: "还没有检测 DNS 延时",
@@ -1180,9 +1188,11 @@ async function refreshDnsDelays(options = {}) {
   }
   try {
     const params = new URLSearchParams();
-    const groupsDns = state.groups?.dns || {};
-    if (groupsDns.local_custom_server) params.set("custom_server", groupsDns.local_custom_server);
-    if (groupsDns.local_custom_port) params.set("custom_port", String(groupsDns.local_custom_port));
+    const firstCustom = customDnsServers().find((item) => item.server);
+    if (firstCustom) {
+      params.set("custom_server", firstCustom.server);
+      params.set("custom_port", String(firstCustom.port || 53));
+    }
     const suffix = params.toString() ? `?${params.toString()}` : "";
     const result = await api(`/api/dns-delays${suffix}`);
     if (result.state) state = result.state;
@@ -1601,6 +1611,9 @@ function renderHealthSummaryBanner(configHealth) {
 
 function formatLocalDnsStatus(item) {
   if (!item || !item.server) return t("unknown");
+  if (item.forwarder && Array.isArray(item.upstreams) && item.upstreams.length) {
+    return `${t("localDnsForwarder")} → ${item.upstreams.join(", ")}`;
+  }
   return `${item.server}${item.port ? `:${item.port}` : ""}`;
 }
 
@@ -2901,12 +2914,23 @@ function currentLocalDns() {
   return state.groups.dns.local;
 }
 
+function customDnsServers() {
+  const dns = state.groups?.dns || {};
+  if (Array.isArray(dns.local_custom_servers) && dns.local_custom_servers.length) {
+    return dns.local_custom_servers.map((item) => ({
+      server: String(item?.server || "").trim(),
+      port: Number(item?.port || 53),
+    }));
+  }
+  return [{ server: dns.local_custom_server || "223.5.5.5", port: Number(dns.local_custom_port || 53) }];
+}
+
 function dnsChoiceDisplay(key, item) {
   if (key !== "custom_dns") return `${item.label} · ${item.server}`;
-  const groupsDns = state.groups?.dns || {};
-  const server = groupsDns.local_custom_server || "223.5.5.5";
-  const port = Number(groupsDns.local_custom_port || 53);
-  return `${item.label} · ${server}${port && port !== 53 ? `:${port}` : ""}`;
+  const servers = customDnsServers();
+  const first = servers[0] || { server: "223.5.5.5", port: 53 };
+  const suffix = servers.length > 1 ? ` +${servers.length - 1}` : "";
+  return `${item.label} · ${first.server}${first.port && first.port !== 53 ? `:${first.port}` : ""}${suffix}`;
 }
 
 function renderLocalDnsSettings() {
@@ -2951,15 +2975,94 @@ function renderLocalDnsSettings() {
     row.append(name, value);
     rows.appendChild(row);
   }
+  renderCustomDnsRows();
   const fields = $("customDnsFields");
-  const serverInput = $("customDnsServer");
-  const portInput = $("customDnsPort");
-  serverInput.value = (state.groups.dns || {}).local_custom_server || "223.5.5.5";
-  portInput.value = (state.groups.dns || {}).local_custom_port || 53;
   if (current === "custom_dns") {
     fields.classList.remove("hidden");
   } else {
     fields.classList.add("hidden");
+  }
+}
+
+// 自定义 DNS 行以草稿为准渲染：用户增删/输入过程中 render() 不能把未填完的行冲掉；
+// 保存成功或重新加载状态后草稿清空，回到 state 的归一值。
+let customDnsDraft = null;
+
+function renderCustomDnsRows() {
+  const rows = $("customDnsRows");
+  if (!rows) return;
+  const servers = customDnsDraft || customDnsServers();
+  rows.innerHTML = "";
+  servers.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "custom-dns-row";
+    const serverLabel = document.createElement("label");
+    const serverSpan = document.createElement("span");
+    serverSpan.textContent = t("customDnsServer");
+    const serverInput = document.createElement("input");
+    serverInput.type = "text";
+    serverInput.className = "custom-dns-server";
+    serverInput.value = item.server || "";
+    serverInput.placeholder = "223.5.5.5";
+    serverLabel.append(serverSpan, serverInput);
+    const portLabel = document.createElement("label");
+    const portSpan = document.createElement("span");
+    portSpan.textContent = t("customDnsPort");
+    const portInput = document.createElement("input");
+    portInput.type = "number";
+    portInput.className = "custom-dns-port";
+    portInput.min = "1";
+    portInput.max = "65535";
+    portInput.value = item.port || 53;
+    portLabel.append(portSpan, portInput);
+    row.append(serverLabel, portLabel);
+    if (servers.length > 1) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "secondary-btn custom-dns-remove";
+      removeBtn.textContent = t("customDnsRemove");
+      removeBtn.addEventListener("click", () => {
+        collectCustomDnsRows();
+        customDnsDraft.splice(index, 1);
+        state.groups.dns.local_custom_servers = customDnsDraft;
+        syncCustomDnsMirror();
+        markChanged();
+        renderCustomDnsRows();
+      });
+      row.append(removeBtn);
+    }
+    rows.appendChild(row);
+  });
+  rows.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("input", syncNodeSettingsChanged);
+    input.addEventListener("change", syncNodeSettingsChanged);
+  });
+  const addBtn = $("addCustomDnsBtn");
+  if (addBtn) addBtn.disabled = servers.length >= 5;
+}
+
+function collectCustomDnsRows() {
+  state.groups.dns = state.groups.dns || {};
+  const rows = $("customDnsRows");
+  if (!rows) return;
+  const servers = [];
+  rows.querySelectorAll(".custom-dns-row").forEach((row) => {
+    servers.push({
+      server: row.querySelector(".custom-dns-server")?.value.trim() || "",
+      port: Number(row.querySelector(".custom-dns-port")?.value) || 53,
+    });
+  });
+  customDnsDraft = servers;
+  state.groups.dns.local_custom_servers = servers;
+  syncCustomDnsMirror();
+}
+
+function syncCustomDnsMirror() {
+  const dns = state.groups.dns || {};
+  const filled = (dns.local_custom_servers || []).filter((item) => item.server);
+  if (filled.length) {
+    dns.local_custom_server = filled[0].server;
+    dns.local_custom_port = filled[0].port;
   }
 }
 
@@ -4150,11 +4253,17 @@ async function save(silent = false) {
   setStatus(t("savingWithCheck"));
   proxyRequestVersion++;
   try {
+    // 发送前去掉没填服务器地址的自定义 DNS 空行（草稿保留在页面上，保存失败也不丢）。
+    const outgoingGroups = JSON.parse(JSON.stringify(state.groups));
+    if (Array.isArray(outgoingGroups.dns?.local_custom_servers)) {
+      outgoingGroups.dns.local_custom_servers = outgoingGroups.dns.local_custom_servers.filter((item) => item.server);
+    }
     const result = await api("/api/save", {
       method: "POST",
-      body: JSON.stringify({ lists: state.lists, nodes: state.nodes, groups: state.groups }),
+      body: JSON.stringify({ lists: state.lists, nodes: state.nodes, groups: outgoingGroups }),
     });
     state = result.state;
+    customDnsDraft = null;
     maintenance = result.maintenance || maintenance;
     proxyRequestVersion++;
     if (result.proxy) applyProxyPayload({ proxy: result.proxy, delays: result.delays });
@@ -4165,7 +4274,9 @@ async function save(silent = false) {
     setDirty(false);
     render();
     refreshDelaysInBackground();
-    if (result.tproxySync && result.tproxySync.code !== 0) {
+    if (result.hotDns) {
+      setStatus(t("dnsHotApplied"), "ok");
+    } else if (result.tproxySync && result.tproxySync.code !== 0) {
       setStatus(`${t("savedAndRestarted")}；${t("tproxySyncFailed")}`, "bad");
     } else {
       setStatus(t("savedAndRestarted"), "ok");
@@ -4386,8 +4497,7 @@ function syncNodeSettingsFromForm() {
   state.groups.auto.interrupt_exist_connections = $("interruptConnections").checked;
   state.groups.dns = state.groups.dns || {};
   state.groups.dns.local = $("localDnsSelect").value || "alidns";
-  state.groups.dns.local_custom_server = ($("customDnsServer").value || "223.5.5.5").trim();
-  state.groups.dns.local_custom_port = Number($("customDnsPort").value) || 53;
+  collectCustomDnsRows();
   state.groups.fakeip = state.groups.fakeip || {};
   state.groups.fakeip.inet4_range = $("fakeipV4").value.trim();
   state.groups.fakeip.inet6_range = $("fakeipV6").value.trim();
@@ -4443,10 +4553,15 @@ $("routeFinal").addEventListener("change", async () => {
     setStatus(error.message, "bad");
   }
 });
-$("customDnsServer").addEventListener("input", syncNodeSettingsChanged);
-$("customDnsServer").addEventListener("change", syncNodeSettingsChanged);
-$("customDnsPort").addEventListener("input", syncNodeSettingsChanged);
-$("customDnsPort").addEventListener("change", syncNodeSettingsChanged);
+$("addCustomDnsBtn").addEventListener("click", () => {
+  collectCustomDnsRows();
+  if (!customDnsDraft) customDnsDraft = customDnsServers();
+  if (customDnsDraft.length >= 5) return;
+  customDnsDraft.push({ server: "", port: 53 });
+  state.groups.dns.local_custom_servers = customDnsDraft;
+  markChanged();
+  renderCustomDnsRows();
+});
 $("refreshDnsDelayBtn").addEventListener("click", refreshDnsDelays);
 $("proxyDefault").addEventListener("change", () => {
   syncNodeSettingsChanged();

@@ -149,14 +149,8 @@
               <select id="localDnsSelect"></select>
             </label>
             <div id="customDnsFields" class="custom-dns-fields hidden">
-              <label>
-                <span data-i18n="customDnsServer">Server</span>
-                <input type="text" id="customDnsServer" value="223.5.5.5" placeholder="223.5.5.5" />
-              </label>
-              <label>
-                <span data-i18n="customDnsPort">Port</span>
-                <input type="number" id="customDnsPort" value="53" min="1" max="65535" />
-              </label>
+              <div id="customDnsRows" class="custom-dns-rows"></div>
+              <button id="addCustomDnsBtn" class="secondary-btn" type="button" data-i18n="customDnsAdd">+ Add</button>
             </div>
             <button id="refreshDnsDelayBtn" class="secondary-btn" type="button" data-i18n="refreshDnsDelay">Refresh DNS delay</button>
             <p class="dns-note" data-i18n="localDnsNote">Choose one upstream for direct China domains. sing-box does not run these in parallel.</p>

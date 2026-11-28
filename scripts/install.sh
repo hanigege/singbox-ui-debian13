@@ -16,11 +16,11 @@ if getent ahostsv4 github.com | awk '{print $1}' | grep -Eq '^(28\.|198\.(18|19)
   exit 1
 fi
 apt-get -o APT::Update::Error-Mode=any update
-apt-get install -y --no-install-recommends ca-certificates curl python3 python3-qrcode nftables iproute2 iputils-ping rsync util-linux logrotate procps unattended-upgrades
+apt-get install -y --no-install-recommends ca-certificates curl python3 python3-qrcode nftables iproute2 iputils-ping rsync util-linux logrotate procps unattended-upgrades dnsmasq
 gateway_tmp=$(mktemp -d)
 backup_dir=/var/backups/singbox-ui/$(date +%Y%m%d-%H%M%S)-$$
 mkdir -p "$backup_dir"
-services=(sing-box-auto-proxy-watch.service sing-box.service sing-box-tproxy.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer sing-box-config-backup.timer)
+services=(sing-box-auto-proxy-watch.service sing-box.service sing-box-tproxy.service sing-box-dns-forwarder.service singbox-rule-ui.service update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer sing-box-config-backup.timer)
 if [ -x /usr/sbin/ifup ] && systemctl cat ifupdown-wait-online.service >/dev/null 2>&1; then
   services+=(ifupdown-wait-online.service)
 fi
@@ -101,6 +101,12 @@ if [ ! -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]; then
   install -m 0644 "$PROJECT_DIR/templates/apt/52unattended-upgrades-local" /etc/apt/apt.conf.d/52unattended-upgrades-local
 fi
 install -m 0644 "$PROJECT_DIR"/systemd/* /etc/systemd/system/
+# 国内 DNS 本机转发层（dnsmasq）主配置：托管文件，每次安装都对齐仓库版本；
+# 真实上游在 manager/dns-upstreams.conf，由平台维护，安装器不覆盖已有值。
+install -m 0644 "$PROJECT_DIR/templates/dnsmasq-forwarder.conf" /etc/sing-box/dnsmasq-forwarder.conf
+# Debian 的 dnsmasq 包自带同名服务会占 53 端口并自启，本机转发层用独立单元，关掉它。
+systemctl disable --now dnsmasq.service 2>/dev/null || true
+systemctl reset-failed dnsmasq.service 2>/dev/null || true
 if [ ! -f /etc/default/singbox-gateway ]; then
   install -m 0600 "$PROJECT_DIR/templates/gateway.env" /etc/default/singbox-gateway
 fi
@@ -108,6 +114,37 @@ set -a
 . /etc/default/singbox-gateway
 set +a
 python3 "$PROJECT_DIR/scripts/bootstrap_config.py"
+# 转发层上游初始值：按当前 groups 的生效选择生成（新装=默认预设，升级=用户现有选择），
+# 保证 sing-box 起来之前转发层就有正确上游；之后由平台热维护。生成失败不挡安装，
+# rule-ui 启动时还会再同步一次。
+python3 - <<'PYEOF' || true
+import json
+from pathlib import Path
+
+groups = {}
+try:
+    groups = json.loads(Path("/etc/sing-box/manager/groups.json").read_text(encoding="utf-8"))
+except Exception:
+    pass
+dns = groups.get("dns", {}) if isinstance(groups, dict) else {}
+presets = {"dnspod": ("119.29.29.29", 53), "alidns": ("223.5.5.5", 53), "114dns": ("114.114.114.114", 53)}
+choice = dns.get("local", "dnspod")
+upstreams = []
+if choice == "custom_dns":
+    raw = dns.get("local_custom_servers")
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("server"):
+                upstreams.append((str(item["server"]), int(item.get("port", 53))))
+    if not upstreams and dns.get("local_custom_server"):
+        upstreams.append((str(dns["local_custom_server"]), int(dns.get("local_custom_port", 53))))
+    if not upstreams:
+        upstreams = [("223.5.5.5", 53)]
+else:
+    upstreams = [presets.get(choice, presets["dnspod"])]
+lines = [f"server={server}" + (f"#{port}" if port != 53 else "") for server, port in upstreams[:5]]
+Path("/etc/sing-box/manager/dns-upstreams.conf").write_text("\n".join(lines) + "\n", encoding="utf-8")
+PYEOF
 RULE_UPDATE_RESTART=0 RULE_UPDATE_LOCK_WAIT=300 /usr/local/sbin/update-sing-box-rules-jsdelivr
 /usr/local/sbin/refresh-sing-box-runtime-config
 /usr/local/bin/sing-box check -c /etc/sing-box/config.json
@@ -119,7 +156,7 @@ systemctl daemon-reload
 /usr/local/sbin/refresh-sing-box-tproxy-setup
 systemd-analyze verify "$PROJECT_DIR"/systemd/*
 systemctl enable "${services[@]}"
-systemctl restart sing-box-tproxy sing-box singbox-rule-ui
+systemctl restart sing-box-dns-forwarder sing-box-tproxy sing-box singbox-rule-ui
 systemctl restart sing-box-auto-proxy-watch
 systemctl restart update-sing-box-rules.timer monitor-sing-box-runtime.timer sing-box-logrotate.timer sing-box-auto-proxy-learning.timer sing-box-config-backup.timer
 python3 "$PROJECT_DIR/scripts/health_check.py"

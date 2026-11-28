@@ -103,7 +103,7 @@ LOCAL_DNS_SERVER = {
     "type": "udp",
     "server": "119.29.29.29",
     "server_port": 53,
-    # 国内直连域名只会路由到一个 local-dns；当前 sing-box 没有 DNS 并发/备用组，UI 只能明确选择单个上游。
+    # 国内直连域名只会路由到一个 local-dns（sing-box 没有 DNS 并发/备用组）；多上游并发在转发层实现，见 DNS_FORWARDER_*。
 }
 DDNS_REMOTE_DNS_SERVER = {
     "tag": "ddns-remote-dns",
@@ -125,6 +125,17 @@ LOCAL_DNS_CHOICES = {
 }
 DEFAULT_LOCAL_DNS_CHOICE = "dnspod"
 LOCAL_DNS_BY_SERVER = {item["server"]: key for key, item in LOCAL_DNS_CHOICES.items()}
+# 国内 DNS 本机转发层：转发层可用时，sing-box 的 local-dns 固定指向 127.0.0.1:1053 的
+# dnsmasq，真实上游写在 manager/dns-upstreams.conf（dnsmasq 的 servers-file，SIGHUP 热重读）。
+# 切换预设、增删改自定义上游都只改这个文件，不再重启 sing-box；多个上游由 dnsmasq
+# 并发查询取最快答复（all-servers）。转发层不可用（老安装未装 dnsmasq）时全套回退旧口径：
+# local-dns 直接渲染真实上游、改 DNS 重启 sing-box 生效。
+DNS_FORWARDER_HOST = "127.0.0.1"
+DNS_FORWARDER_PORT = 1053
+DNS_FORWARDER_UNIT = "sing-box-dns-forwarder.service"
+DNS_FORWARDER_UNIT_PATH = Path(os.environ.get("RULE_UI_DNS_FORWARDER_UNIT", "/etc/systemd/system/sing-box-dns-forwarder.service"))
+DNS_UPSTREAMS_PATH = Path(os.environ.get("RULE_UI_DNS_UPSTREAMS", str(MANAGER_DIR / "dns-upstreams.conf")))
+LOCAL_DNS_CUSTOM_MAX = 5
 DEFAULT_FAKEIP4 = "198.18.0.0/15"
 DEFAULT_FAKEIP6 = "2001:2::198:18:0:0/96"
 LEGACY_FAKEIP4 = "28.0.0.0/8"
@@ -990,13 +1001,25 @@ def extract_initial_manager_data(config):
                 "inet6_range": server.get("inet6_range", DEFAULT_FAKEIP6),
             }
             break
+    local_dns_custom_servers = []
     for server in config.get("dns", {}).get("servers", []) or []:
         if isinstance(server, dict) and server.get("tag") == "local-dns":
             server_addr = str(server.get("server", "")).strip()
-            if server_addr in LOCAL_DNS_BY_SERVER:
+            if server_addr == DNS_FORWARDER_HOST and dns_forwarder_available():
+                # 转发层模式下 config 里只有回环地址，真实选择在 servers-file 里，从那里还原。
+                upstreams = read_dns_upstreams_file() or []
+                if len(upstreams) == 1 and upstreams[0]["port"] == 53 and upstreams[0]["server"] in LOCAL_DNS_BY_SERVER:
+                    local_dns_choice = LOCAL_DNS_BY_SERVER[upstreams[0]["server"]]
+                elif upstreams:
+                    local_dns_choice = "custom_dns"
+                    local_dns_custom_servers = upstreams
+            elif server_addr in LOCAL_DNS_BY_SERVER:
                 local_dns_choice = LOCAL_DNS_BY_SERVER[server_addr]
             else:
                 local_dns_choice = "custom_dns"
+                local_dns_custom_servers = [
+                    {"server": server_addr, "port": normalize_port(server.get("server_port", 53))}
+                ]
             break
     base = json.loads(json.dumps(config))
     base["outbounds"] = []
@@ -1024,7 +1047,12 @@ def extract_initial_manager_data(config):
             },
             **fakeip,
         },
-        "dns": {"local": local_dns_choice, "local_custom_server": "223.5.5.5", "local_custom_port": 53},
+        "dns": {
+            "local": local_dns_choice,
+            "local_custom_server": local_dns_custom_servers[0]["server"] if local_dns_custom_servers else "223.5.5.5",
+            "local_custom_port": local_dns_custom_servers[0]["port"] if local_dns_custom_servers else 53,
+            "local_custom_servers": local_dns_custom_servers or [{"server": "223.5.5.5", "port": 53}],
+        },
         "ddns": {"dns": "local"},
     }
     return base, normalize_nodes(nodes), groups
@@ -1105,6 +1133,13 @@ def load_groups():
         groups["dns"]["local"] = DEFAULT_LOCAL_DNS_CHOICE
     groups["dns"].setdefault("local_custom_server", "223.5.5.5")
     groups["dns"].setdefault("local_custom_port", 53)
+    # 自定义上游列表：老部署只有单值字段，读入时迁移成列表；单值字段始终镜像列表首项，
+    # 让仍读旧字段的代码（延时检测、备份导出）看到的值与列表一致。
+    groups["dns"]["local_custom_servers"] = normalize_custom_dns_servers(groups["dns"])
+    if groups["dns"]["local_custom_servers"]:
+        first_custom = groups["dns"]["local_custom_servers"][0]
+        groups["dns"]["local_custom_server"] = first_custom["server"]
+        groups["dns"]["local_custom_port"] = first_custom["port"]
     # ECS 功能已移除（家宽直连国内 DNS 时上游本就按出口 IP 就近解析，填错网段反而把 CDN 打到境外）。
     # 老部署的 groups.json 可能残留该键，读入时直接剔除，避免配置里留着一个没人管的死字段。
     groups["dns"].pop("local_ecs_subnet", None)
@@ -2457,11 +2492,168 @@ def apply_fakeip_settings(config, groups):
     target["inet6_range"] = inet6_range
 
 
+def dns_forwarder_available():
+    override = os.environ.get("RULE_UI_DNS_FORWARDER", "").strip().lower()
+    if override in ("1", "true", "yes"):
+        return True
+    if override in ("0", "false", "no"):
+        return False
+    return shutil.which("dnsmasq") is not None and DNS_FORWARDER_UNIT_PATH.exists()
+
+
+def normalize_custom_dns_servers(dns, strict=False):
+    """把 groups['dns'] 的自定义上游归一成 [{'server': ip, 'port': n}, ...]（保序去重）。
+    新字段 local_custom_servers 优先；缺失时从旧的 local_custom_server/port 单值迁移。
+    strict=True（保存路径）对非法 IP、超量抛 ValueError；读入路径跳过非法条目并截断到上限。"""
+    raw = dns.get("local_custom_servers")
+    entries = []
+    if isinstance(raw, list) and raw:
+        for item in raw:
+            if isinstance(item, dict):
+                entries.append((str(item.get("server", "")).strip(), item.get("port", 53)))
+            elif isinstance(item, str):
+                entries.append((item.strip(), 53))
+    else:
+        legacy = str(dns.get("local_custom_server", "")).strip()
+        if legacy:
+            entries.append((legacy, dns.get("local_custom_port", 53)))
+    result = []
+    seen = set()
+    for server, port in entries:
+        try:
+            ip = ipaddress.ip_address(server)
+            normalized_port = normalize_port(port)
+        except (ValueError, TypeError):
+            if strict:
+                raise ValueError(f"Invalid custom DNS server: {server!r} (IP address required)")
+            continue
+        key = (str(ip), normalized_port)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({"server": str(ip), "port": normalized_port})
+    if strict and len(result) > LOCAL_DNS_CUSTOM_MAX:
+        raise ValueError(f"Too many custom DNS servers: max {LOCAL_DNS_CUSTOM_MAX}")
+    return result[:LOCAL_DNS_CUSTOM_MAX]
+
+
+def effective_local_dns_upstreams(groups):
+    """当前生效的国内 DNS 上游列表：预设为单元素，自定义为用户列表（空时回退默认）。"""
+    dns = (groups or {}).get("dns", {})
+    choice = dns.get("local", DEFAULT_LOCAL_DNS_CHOICE)
+    if choice == "custom_dns":
+        servers = normalize_custom_dns_servers(dns)
+        return servers or [{"server": "223.5.5.5", "port": 53}]
+    item = LOCAL_DNS_CHOICES.get(choice, LOCAL_DNS_CHOICES[DEFAULT_LOCAL_DNS_CHOICE])
+    return [{"server": item["server"], "port": item["server_port"]}]
+
+
+def render_dns_upstreams_file(upstreams):
+    lines = []
+    for item in upstreams:
+        line = f"server={item['server']}"
+        if int(item["port"]) != 53:
+            line += f"#{item['port']}"
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def read_dns_upstreams_file():
+    """解析 dnsmasq servers-file 里的上游列表；文件不存在/读不了返回 None。"""
+    try:
+        text = DNS_UPSTREAMS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    result = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("server="):
+            continue
+        value = line[len("server="):].strip()
+        if "/" in value:
+            continue
+        port = 53
+        if "#" in value:
+            value, port_text = value.rsplit("#", 1)
+            try:
+                port = int(port_text)
+            except ValueError:
+                continue
+        try:
+            ip = ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        result.append({"server": str(ip), "port": port})
+    return result
+
+
+def sync_dns_forwarder(groups=None):
+    """把生效中的国内 DNS 上游热同步给本机转发层（dnsmasq）。
+    只改 servers-file 并 SIGHUP 热重读：不重启 sing-box、不断现有连接。
+    转发层不可用时返回 available=False，调用方按旧口径处理（渲染真实上游 + 重启生效）。"""
+    if not dns_forwarder_available():
+        return {"available": False, "changed": False, "reloaded": False, "service": None}
+    groups = groups or load_groups()
+    content = render_dns_upstreams_file(effective_local_dns_upstreams(groups))
+    try:
+        changed = DNS_UPSTREAMS_PATH.read_text(encoding="utf-8") != content
+    except OSError:
+        changed = True
+    if changed:
+        DNS_UPSTREAMS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = DNS_UPSTREAMS_PATH.with_name(DNS_UPSTREAMS_PATH.name + ".tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        os.replace(tmp_path, DNS_UPSTREAMS_PATH)
+    status = unit_status(DNS_FORWARDER_UNIT)
+    reloaded = False
+    if status != "active":
+        run_command(["systemctl", "start", DNS_FORWARDER_UNIT], timeout=15)
+        status = unit_status(DNS_FORWARDER_UNIT)
+    elif changed:
+        run_command(["systemctl", "kill", "--signal=HUP", DNS_FORWARDER_UNIT], timeout=15)
+        reloaded = True
+    return {"available": True, "changed": changed, "reloaded": reloaded, "service": status}
+
+
+def dns_only_change(normalized_lists, nodes, groups):
+    """判断本次保存相对现行状态是否只有国内 DNS 设置不同（/api/save 热路径判据）。
+    任一比较出错都返回 False（回退完整保存流程），保证热路径只在完全确定时才走。"""
+    try:
+        current = load_state()
+
+        def canon(value):
+            return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+        if canon(normalized_lists) != canon(current.get("lists", {})):
+            return False
+        if canon(nodes) != canon(current.get("nodes", [])):
+            return False
+        new_groups = json.loads(json.dumps(groups))
+        old_groups = json.loads(json.dumps(current.get("groups", {})))
+        # auto.preferred 是运行态（当前 Auto 选中节点），不算用户在设置页里的改动。
+        new_groups.get("auto", {}).pop("preferred", None)
+        old_groups.get("auto", {}).pop("preferred", None)
+        if canon(new_groups.get("dns", {})) == canon(old_groups.get("dns", {})):
+            return False
+        new_groups["dns"] = old_groups.get("dns", {})
+        return canon(new_groups) == canon(old_groups)
+    except Exception:
+        return False
+
+
 def local_dns_server_config(choice, groups_dns=None):
+    if dns_forwarder_available():
+        # 转发层模式：local-dns 固定指向本机 dnsmasq，真实上游由 sync_dns_forwarder 维护。
+        server = json.loads(json.dumps(LOCAL_DNS_SERVER))
+        server["server"] = DNS_FORWARDER_HOST
+        server["server_port"] = DNS_FORWARDER_PORT
+        return server
     if choice == "custom_dns" and groups_dns:
         server = json.loads(json.dumps(LOCAL_DNS_SERVER))
-        server["server"] = groups_dns.get("local_custom_server", "223.5.5.5")
-        server["server_port"] = normalize_port(groups_dns.get("local_custom_port", 53))
+        customs = normalize_custom_dns_servers(groups_dns)
+        first = customs[0] if customs else {"server": "223.5.5.5", "port": 53}
+        server["server"] = first["server"]
+        server["server_port"] = first["port"]
     else:
         item = LOCAL_DNS_CHOICES.get(choice, LOCAL_DNS_CHOICES[DEFAULT_LOCAL_DNS_CHOICE])
         server = json.loads(json.dumps(LOCAL_DNS_SERVER))
@@ -4081,6 +4273,15 @@ def config_health_status():
         "server": local_dns.get("server", ""),
         "port": local_dns.get("server_port", ""),
     }
+    if local_dns_status["server"] == DNS_FORWARDER_HOST:
+        # 转发层模式下 config 里只有回环地址，体检展示真实上游（来自 groups 的生效值）。
+        local_dns_status["forwarder"] = True
+        local_dns_status["upstreams"] = [
+            f"{item['server']}:{item['port']}" for item in effective_local_dns_upstreams(load_groups())
+        ]
+    else:
+        local_dns_status["forwarder"] = False
+        local_dns_status["upstreams"] = []
     fakeip_status = {
         "inet4Range": fakeip_dns.get("inet4_range", ""),
         "inet6Range": fakeip_dns.get("inet6_range", ""),
@@ -4723,12 +4924,33 @@ def normalize_payload_groups(raw_groups, nodes=None):
                 raise ValueError(f"Invalid local DNS upstream: {local_dns}")
             # 国内 DNS 上游影响所有直连域名解析，只接受内置候选，避免把错误地址写成“已保存”。
             groups["dns"]["local"] = local_dns
-            # 无条件恢复 local_custom_server/port，即使当前 local 不是 custom_dns：
-            # 导出备份始终包含这两个字段，用户期望导入后与导出完全一致，不受 local 选择影响。
-            custom_server = str(dns.get("local_custom_server", "")).strip()
-            if custom_server:
-                groups["dns"]["local_custom_server"] = custom_server
-            groups["dns"]["local_custom_port"] = normalize_port(dns.get("local_custom_port", 53))
+            # 无条件恢复自定义上游，即使当前 local 不是 custom_dns：
+            # 导出备份始终包含这些字段，用户期望导入后与导出完全一致，不受 local 选择影响。
+            # 新字段 local_custom_servers（列表，最多 5 个）优先；只有旧单值字段时按单值恢复，
+            # 并统一生成列表、让单值字段镜像列表首项，三者永远一致。
+            if isinstance(dns.get("local_custom_servers"), list) and dns["local_custom_servers"]:
+                groups["dns"]["local_custom_servers"] = normalize_custom_dns_servers(dns, strict=True)
+            else:
+                custom_server = str(dns.get("local_custom_server", "")).strip()
+                if custom_server:
+                    groups["dns"]["local_custom_server"] = custom_server
+                groups["dns"]["local_custom_port"] = normalize_port(dns.get("local_custom_port", 53))
+                # 列表只从刚恢复好的单值字段生成，不能让 groups 里上次的列表反过来盖掉新单值。
+                restored_legacy = {}
+                if groups["dns"].get("local_custom_server"):
+                    restored_legacy = {
+                        "local_custom_server": groups["dns"]["local_custom_server"],
+                        "local_custom_port": groups["dns"]["local_custom_port"],
+                    }
+                groups["dns"]["local_custom_servers"] = (
+                    normalize_custom_dns_servers(restored_legacy, strict=True) if restored_legacy else []
+                )
+            if groups["dns"]["local_custom_servers"]:
+                first_custom = groups["dns"]["local_custom_servers"][0]
+                groups["dns"]["local_custom_server"] = first_custom["server"]
+                groups["dns"]["local_custom_port"] = first_custom["port"]
+            if local_dns == "custom_dns" and not groups["dns"]["local_custom_servers"]:
+                raise ValueError("Custom DNS needs at least one server")
         ddns = raw_groups.get("ddns")
         if isinstance(ddns, dict):
             mode = str(ddns.get("dns", groups["ddns"].get("dns", "local"))).strip()
@@ -4817,6 +5039,9 @@ def apply_all(normalized_lists, nodes, groups):
         # 配置、节点和规则属于一个事务；不能让异常把它们留在不同版本。
         rollback_apply(result)
         raise
+    # 国内 DNS 上游同步给本机转发层（热生效，不依赖 sing-box 重启）；
+    # 转发层不可用时为空操作，local-dns 已在渲染时按旧口径回退。
+    result["dnsForwarder"] = sync_dns_forwarder(groups)
     return result
 
 
@@ -5434,6 +5659,26 @@ class Handler(BaseHTTPRequestHandler):
                 if previous_auto_now in enabled_node_tags(nodes):
                     groups.setdefault("auto", {})["preferred"] = previous_auto_now
                 previous_delays = get_node_delays(test=False)
+                if dns_forwarder_available() and dns_only_change(normalized_lists, nodes, groups):
+                    # 热路径：只有国内 DNS 设置变了 → 只落盘 groups 并热同步转发层，
+                    # 不重渲染配置、不重启 sing-box、不动 TProxy，现有连接不受影响。
+                    write_json(GROUPS_PATH, groups)
+                    forwarder = sync_dns_forwarder(groups)
+                    self.send_json(
+                        {
+                            "saved": {"dnsForwarder": forwarder},
+                            "check": {"code": 0, "stdout": "", "stderr": ""},
+                            "restart": None,
+                            "rollback": None,
+                            "tproxySync": {"code": 0},
+                            "hotDns": True,
+                            "proxy": get_proxy_state(),
+                            "delays": previous_delays,
+                            "maintenance": maintenance_status(),
+                            "state": load_state(),
+                        }
+                    )
+                    return
                 check = staged_check(normalized_lists, nodes=nodes, groups=groups)
                 if check["code"] != 0:
                     self.send_json(
@@ -5952,6 +6197,12 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     get_token()
+    try:
+        # 启动时把国内 DNS 上游与转发层对齐一次（覆盖全新安装与存量升级后的首次启动）；
+        # 失败只打日志，绝不挡 UI 启动（平台永远不死）。
+        sync_dns_forwarder()
+    except Exception as exc:
+        print(f"dns forwarder sync skipped: {exc}")
     host = os.environ.get("RULE_UI_HOST", "0.0.0.0")
     port = int(os.environ.get("RULE_UI_PORT", "9091"))
     print(f"Sing-box Rule UI listening on http://{host}:{port}")

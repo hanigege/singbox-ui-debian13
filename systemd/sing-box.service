@@ -1,7 +1,7 @@
 [Unit]
 Description=sing-box gateway
-Wants=network-online.target sing-box-tproxy.service
-After=network-online.target sing-box-tproxy.service
+Wants=network-online.target sing-box-tproxy.service sing-box-dns-forwarder.service
+After=network-online.target sing-box-tproxy.service sing-box-dns-forwarder.service
 
 [Service]
 Type=simple

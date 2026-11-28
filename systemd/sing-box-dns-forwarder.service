@@ -1,0 +1,13 @@
+[Unit]
+Description=sing-box gateway local DNS forwarder (dnsmasq)
+After=network.target
+Before=sing-box.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --no-daemon -C /etc/sing-box/dnsmasq-forwarder.conf
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

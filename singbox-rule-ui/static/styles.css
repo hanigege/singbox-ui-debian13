@@ -737,10 +737,23 @@ button[data-i18n="updateRules"] {
 }
 
 .custom-dns-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   grid-column: 1 / -1;
+}
+
+.custom-dns-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-dns-row {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  gap: 8px;
+  align-items: end;
 }
 
 .range-field {
@@ -1845,8 +1858,8 @@ button[data-i18n="updateRules"] {
     grid-template-columns: 1fr;
   }
 
-  .custom-dns-fields {
-    grid-template-columns: 1fr;
+  .custom-dns-row {
+    grid-template-columns: 1fr 90px auto;
   }
 
   /* policy-grid 单列 */
