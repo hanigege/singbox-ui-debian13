@@ -216,8 +216,8 @@ const translations = {
     homeLanIpAuto: "Auto-detect (now: ",
     homeLanCidrs: "Extra LAN ranges",
     homeLanCidrsPlaceholder: "Comma separated, e.g. 192.168.2.0/24",
-    homeRealityPort: "Reality port (TCP)",
-    homeHy2Port: "Hy2 port (UDP)",
+    homeRealityPort: "LAN + Internet Reality port (TCP)",
+    homeHy2Port: "LAN + Internet Hy2 port (UDP)",
     homeLanRealityPort: "LAN-only Reality port (TCP)",
     homeLanHy2Port: "LAN-only Hy2 port (UDP)",
     homeLanIp: "Gateway LAN IP",
@@ -665,8 +665,8 @@ const translations = {
     homeLanIpAuto: "留空自动检测（当前：",
     homeLanCidrs: "额外内网段",
     homeLanCidrsPlaceholder: "逗号分隔，如 192.168.2.0/24",
-    homeRealityPort: "Reality 端口（TCP）",
-    homeHy2Port: "Hy2 端口（UDP）",
+    homeRealityPort: "内网+外网 Reality 端口（TCP）",
+    homeHy2Port: "内网+外网 Hy2 端口（UDP）",
     homeLanRealityPort: "仅内网 Reality 端口（TCP）",
     homeLanHy2Port: "仅内网 Hy2 端口（UDP）",
     homeLanIp: "网关内网 IP",
@@ -3296,6 +3296,14 @@ function renderHome() {
     homeServerItem(
       `Hysteria2 (${t("homePort")} ${server.hy2.port}, ${t("homeServerName")} ${server.hy2.serverName})`,
       server.hy2.enabled ? t("homeOn") : t("homeOff"),
+    ),
+    homeServerItem(
+      `VLESS + Reality (${t("homeModeLanOnly")}, ${t("homePort")} ${server.reality.lanPort}, ${t("homeServerName")} ${server.reality.serverName})`,
+      server.reality.lanEnabled ? t("homeOn") : t("homeOff"),
+    ),
+    homeServerItem(
+      `Hysteria2 (${t("homeModeLanOnly")}, ${t("homePort")} ${server.hy2.lanPort}, ${t("homeServerName")} ${server.hy2.serverName})`,
+      server.hy2.lanEnabled ? t("homeOn") : t("homeOff"),
     ),
   );
   const toggles = document.createElement("div");

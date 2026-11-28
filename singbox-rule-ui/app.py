@@ -1734,6 +1734,15 @@ def build_home_share_links(home, device):
 
 def home_public_view(home):
     server = home["server"]
+    # 仅内网入站的实际状态：协议启用且至少有一台启用的仅内网设备时才真正渲染。
+    lan_active = any(
+        device.get("enabled", True) and device.get("mode") == "lan_only"
+        for device in home["devices"]
+    )
+    lan_active_hy2 = any(
+        device.get("enabled", True) and device.get("mode") == "lan_only" and device.get("hy2_password")
+        for device in home["devices"]
+    )
     return {
         "server": {
             "host": server["host"],
@@ -1742,6 +1751,7 @@ def home_public_view(home):
             "lanCidrs": list(server.get("lan_cidrs") or []),
             "reality": {
                 "enabled": bool(server["reality"].get("enabled")),
+                "lanEnabled": bool(server["reality"].get("enabled")) and lan_active,
                 "port": server["reality"]["port"],
                 "lanPort": server["reality"]["lan_port"],
                 "serverName": server["reality"]["server_name"],
@@ -1751,6 +1761,7 @@ def home_public_view(home):
             },
             "hy2": {
                 "enabled": bool(server["hy2"].get("enabled")),
+                "lanEnabled": bool(server["hy2"].get("enabled")) and lan_active_hy2,
                 "port": server["hy2"]["port"],
                 "lanPort": server["hy2"]["lan_port"],
                 "serverName": server["hy2"]["server_name"],
