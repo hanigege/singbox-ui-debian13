@@ -5254,6 +5254,108 @@ def export_backup_payload():
     }
 
 
+def generate_reality_keypair():
+    generated = run_command(["/usr/local/bin/sing-box", "generate", "reality-keypair"], timeout=15)
+    if generated["code"] != 0:
+        raise ValueError("sing-box generate reality-keypair failed")
+    keys = {}
+    for line in generated["stdout"].splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            keys[key.strip()] = value.strip()
+    if not keys.get("PrivateKey") or not keys.get("PublicKey"):
+        raise ValueError("Unexpected reality-keypair output")
+    return keys["PrivateKey"], keys["PublicKey"]
+
+
+def audit_imported_home(raw_home):
+    """导入备份时审计回家数据：能修的修、不能修的隔离，每一处都产生警告，绝不静默。
+    - Reality 私钥缺失/损坏/整段类型损坏 → 重新生成密钥对（启用意图按备份原样保留，
+      整段损坏到读不出意图时默认启用），警告 reality-key-regenerated；生成失败则保持
+      关闭，警告 reality-key-invalid。导入本身不因这些损坏整单失败（备份可能就是
+      用户唯一的恢复来源），但客户端必须被明确告知要重新导入。
+    - 公钥与私钥对不上 → 按私钥重新推导，警告 reality-pubkey-rederived。
+    - Hy2 曾启用但混淆密码丢失/整段损坏 → 补生成并保持启用，警告 hy2-restored。
+    - 设备凭据损坏（uuid 非法、订阅 token 或 Hy2 密码为空）→ 该设备停用导入，
+      警告 device-disabled 并点名；字段缺到被归一化丢弃的设备 → 警告 device-dropped。
+    返回 (home, warnings)；warnings 元素为 {code, device?, detail?}，文案由前端按 code 翻译。"""
+    home = normalize_home(raw_home)
+    warnings = []
+    raw_server = raw_home.get("server") if isinstance(raw_home, dict) else None
+    if isinstance(raw_server, dict):
+        reality = home["server"]["reality"]
+        raw_reality = raw_server.get("reality")
+        reality_damaged = False
+        desired_enabled = True
+        if "reality" in raw_server and not isinstance(raw_reality, dict):
+            reality_damaged = True
+        elif isinstance(raw_reality, dict) and (raw_reality.get("enabled") or raw_reality.get("private_key")):
+            desired_enabled = bool(raw_reality.get("enabled"))
+            private_key = str(reality.get("private_key") or "").strip()
+            derived = ""
+            if private_key:
+                try:
+                    derived = x25519_public_from_private(private_key)
+                except Exception:
+                    derived = ""
+            if not derived:
+                reality_damaged = True
+            elif str(reality.get("public_key") or "").strip() != derived:
+                reality["public_key"] = derived
+                warnings.append({"code": "reality-pubkey-rederived"})
+        if reality_damaged:
+            try:
+                private_key, public_key = generate_reality_keypair()
+                reality["private_key"] = private_key
+                reality["public_key"] = public_key
+                if not reality.get("short_id"):
+                    reality["short_id"] = [secrets.token_hex(4)]
+                reality["enabled"] = desired_enabled
+                warnings.append({"code": "reality-key-regenerated"})
+            except Exception:
+                reality["enabled"] = False
+                reality["private_key"] = ""
+                reality["public_key"] = ""
+                warnings.append({"code": "reality-key-invalid"})
+        hy2 = home["server"]["hy2"]
+        raw_hy2 = raw_server.get("hy2")
+        hy2_wanted = ("hy2" in raw_server and not isinstance(raw_hy2, dict)) or (
+            isinstance(raw_hy2, dict) and bool(raw_hy2.get("enabled"))
+        )
+        if hy2_wanted and not (hy2.get("enabled") and hy2.get("obfs_password")):
+            hy2["enabled"] = True
+            if not hy2.get("obfs_password"):
+                hy2["obfs_password"] = secrets.token_urlsafe(32)
+            warnings.append({"code": "hy2-restored"})
+    raw_devices = raw_home.get("devices") if isinstance(raw_home, dict) else None
+    if isinstance(raw_devices, list):
+        kept_ids = {device["id"] for device in home["devices"]}
+        for raw in raw_devices:
+            if isinstance(raw, dict):
+                raw_id = str(raw.get("id") or "").strip()
+                if raw_id and raw_id not in kept_ids:
+                    warnings.append({"code": "device-dropped", "device": str(raw.get("name") or raw_id)})
+    for device in home["devices"]:
+        problems = []
+        try:
+            uuid.UUID(str(device.get("uuid") or ""))
+        except (ValueError, TypeError, AttributeError):
+            problems.append("uuid")
+        if not str(device.get("sub_token") or "").strip():
+            problems.append("sub_token")
+        if not str(device.get("hy2_password") or "").strip():
+            problems.append("hy2_password")
+        if problems and device.get("enabled"):
+            device["enabled"] = False
+            warnings.append({"code": "device-disabled", "device": device["name"], "detail": ",".join(problems)})
+    for warning in warnings:
+        home_audit(
+            "backup-import-warning",
+            f"code={warning['code']} device={warning.get('device', '')} detail={warning.get('detail', '')}".strip(),
+        )
+    return home, warnings
+
+
 def import_backup_payload(payload):
     if not isinstance(payload, dict):
         raise ValueError("Backup must be a JSON object")
@@ -5268,9 +5370,11 @@ def import_backup_payload(payload):
     # 回家数据先落盘再 staged_check，让校验覆盖导入的回家入站；
     # 校验不过时把 home.json 恢复成导入前的状态，保持「未导入」语义完整。
     previous_home_backup = None
+    import_warnings = []
     if isinstance(payload.get("home"), dict):
         previous_home_backup = backup_manager_file(HOME_PATH)
-        save_home(normalize_home(payload["home"]))
+        audited_home, import_warnings = audit_imported_home(payload["home"])
+        save_home(audited_home)
     check = staged_check(normalized_lists, nodes=nodes, groups=groups)
     if check["code"] != 0:
         if previous_home_backup is not None:
@@ -5298,6 +5402,7 @@ def import_backup_payload(payload):
     apply_import_runtime_later(nodes, groups, normalized_lists, result, operation["id"])
     return {
         "ok": True,
+        "warnings": import_warnings,
         "error": "",
         "check": check,
         "saved": result,
@@ -6008,18 +6113,9 @@ class Handler(BaseHTTPRequestHandler):
                     reality = home["server"]["reality"]
                     if enabled and not reality.get("private_key"):
                         # 全新安装首次启用：在本机生成密钥对，私钥只落 home.json。
-                        generated = run_command(["/usr/local/bin/sing-box", "generate", "reality-keypair"], timeout=15)
-                        if generated["code"] != 0:
-                            raise ValueError("sing-box generate reality-keypair failed")
-                        keys = {}
-                        for line in generated["stdout"].splitlines():
-                            if ":" in line:
-                                key, value = line.split(":", 1)
-                                keys[key.strip()] = value.strip()
-                        if not keys.get("PrivateKey") or not keys.get("PublicKey"):
-                            raise ValueError("Unexpected reality-keypair output")
-                        reality["private_key"] = keys["PrivateKey"]
-                        reality["public_key"] = keys["PublicKey"]
+                        private_key, public_key = generate_reality_keypair()
+                        reality["private_key"] = private_key
+                        reality["public_key"] = public_key
                         reality["short_id"] = [secrets.token_hex(4)]
                     reality["enabled"] = enabled
                     home_audit("reality-toggle", f"enabled={enabled}")

@@ -375,6 +375,15 @@ const translations = {
     localDnsUpstream: "Upstream",
     customDnsServer: "Custom Server",
     customDnsPort: "Custom Port",
+    importWarningsTitle: "Backup imported, with the following repairs/isolations — please note:",
+    importWarningsShort: "repairs applied, see the alert",
+    importWarnRealityKeyRegenerated: "Home Reality server key was damaged and has been regenerated. All existing client profiles are now invalid — every device must re-import (scan the QR code again).",
+    importWarnRealityKeyInvalid: "Home Reality server key was damaged and could not be repaired automatically; Reality stays off. Re-enable it on the Home page.",
+    importWarnRealityPubkeyRederived: "Home Reality public key did not match its private key and has been re-derived. Devices should re-import their profiles.",
+    importWarnHy2Restored: "Home Hy2 settings were damaged and have been restored as enabled with a new obfuscation password; devices must re-import.",
+    importWarnDeviceDisabled: "Device “{name}” has damaged credentials and was imported disabled. Delete it and add it again.",
+    importWarnDeviceDropped: "Device “{name}” in the backup is missing required fields and was not imported.",
+    importWarnGeneric: "Part of the home data was repaired during import; check the Home page.",
     customDnsAdd: "+ Add server",
     customDnsRemove: "Remove",
     localDnsForwarder: "Local forwarder",
@@ -838,6 +847,15 @@ const translations = {
     localDnsUpstream: "上游",
     customDnsServer: "自定义服务器",
     customDnsPort: "自定义端口",
+    importWarningsTitle: "备份已导入，但有以下修复/隔离，请注意：",
+    importWarningsShort: "有修复/隔离，见弹窗提示",
+    importWarnRealityKeyRegenerated: "回家 Reality 服务器密钥损坏，已重新生成。现有客户端配置全部失效，请让每台设备重新扫码/导入。",
+    importWarnRealityKeyInvalid: "回家 Reality 服务器密钥损坏且自动修复失败，已保持关闭，请到回家页重新开启。",
+    importWarnRealityPubkeyRederived: "回家 Reality 公钥与私钥不匹配，已按私钥重新推导，建议各设备重新导入配置。",
+    importWarnHy2Restored: "回家 Hy2 设置损坏，已恢复启用并生成新的混淆密码，设备需要重新导入。",
+    importWarnDeviceDisabled: "设备「{name}」的凭据损坏，已停用导入，请删除后重新添加。",
+    importWarnDeviceDropped: "备份中的设备「{name}」缺少必要字段，未能导入。",
+    importWarnGeneric: "回家数据在导入时有部分被修复，请到回家页检查。",
     customDnsAdd: "+ 添加服务器",
     customDnsRemove: "删除",
     localDnsForwarder: "本机转发",
@@ -2395,6 +2413,20 @@ async function changeAccessToken() {
   }
 }
 
+function formatImportWarnings(warnings) {
+  if (!Array.isArray(warnings) || !warnings.length) return "";
+  const keyByCode = {
+    "reality-key-regenerated": "importWarnRealityKeyRegenerated",
+    "reality-key-invalid": "importWarnRealityKeyInvalid",
+    "reality-pubkey-rederived": "importWarnRealityPubkeyRederived",
+    "hy2-restored": "importWarnHy2Restored",
+    "device-disabled": "importWarnDeviceDisabled",
+    "device-dropped": "importWarnDeviceDropped",
+  };
+  const lines = warnings.map((item) => t(keyByCode[item.code] || "importWarnGeneric").replace("{name}", item.device || ""));
+  return `${t("importWarningsTitle")}\n${lines.join("\n")}`;
+}
+
 async function importBackupFromFile(event) {
   const file = event.target.files && event.target.files[0];
   event.target.value = "";
@@ -2426,7 +2458,15 @@ async function importBackupFromFile(event) {
     render();
     finishActionButton("importBackupBtn", "actionDone", "done", "importBackup");
     const failedDelays = Object.values(operation.runtime?.delays?.delays || {}).filter((item) => !item?.ok).length;
-    setStatus(failedDelays ? `${t("backupImported")} · ${failedDelays} ${t("delayFailed")}` : t("backupImported"), failedDelays ? "warn" : "ok");
+    const warningText = formatImportWarnings(result.warnings);
+    if (warningText) window.alert(warningText);
+    if (failedDelays) {
+      setStatus(`${t("backupImported")} · ${failedDelays} ${t("delayFailed")}`, "warn");
+    } else if (warningText) {
+      setStatus(`${t("backupImported")} · ${t("importWarningsShort")}`, "warn");
+    } else {
+      setStatus(t("backupImported"), "ok");
+    }
   } catch (error) {
     try {
       state = await api("/api/state");
